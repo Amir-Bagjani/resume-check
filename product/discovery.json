@@ -1,0 +1,54 @@
+{
+  "type": "DISCOVERY",
+  "projectId": "07ba90df-480f-4a2f-bad6-ab8785a69ac6",
+  "summary": "Web app for bulk resume screening from local folder. User picks folder, sets min experience and/or required keywords, app analyzes PDF/DOCX resumes in English/Persian, explains each decision, copies qualified files to Jalali-dated output folder, writes Excel report, shows UI summary. Offline, cross-platform, chunked processing.",
+  "problem": "Reviewing large folders of PDF/Word resumes manually is slow and inconsistent. User needs automatic bulk filtering against experience and keyword criteria with explainable per-resume results.",
+  "targetUsers": [
+    "Hiring managers screening bulk resumes for a role",
+    "Recruiters / HR staff filtering applicant folders"
+  ],
+  "confirmed": [
+    "Web UI with backend reading local folder path directly from server filesystem (same machine), no browser upload",
+    "Input: local folder containing PDF and DOCX resumes only; legacy .doc out of scope",
+    "Resume languages: English and Persian",
+    "Criteria optional individually, at least one criterion required to start screening",
+    "Criterion 1: minimum years of professional experience, approximate total estimated per resume, unknown preserved not forced to pass/fail",
+    "Criterion 2: multiple required technologies/keywords, add-more UI, extensible design for future criteria",
+    "Keyword matching: lightweight fuzzy, case-insensitive, ignores capitalization/spacing/punctuation, handles common variants and aliases (React/react/React.js, Human Resources/human resources), not exact-string-only",
+    "Final status is three-way: Qualified vs Not Qualified vs Undetermined; unknown/missing experience maps to Undetermined, distinct from explicit fail",
+    "Per-resume result explains decision (experience found, skills found/missing, reason text), not just pass/fail",
+    "Output folder auto-created inside source folder, name contains Persian/Jalali date, e.g. resume-screening-output-1405-07-10",
+    "Only qualified resumes copied to output folder; originals never modified or deleted",
+    "Excel report in output folder with run summary (totals, qualified, not qualified, undetermined, criteria used, date) plus one row per resume (filename, candidate name, experience, experience status, skills detected, required found, required missing, final status, reason)",
+    "All processed resumes appear in Excel report regardless of qualification",
+    "Web UI shows post-run summary: found, processed, qualified, not qualified, undetermined counts plus output folder path",
+    "Processing runs in chunks of 10 resumes at a time until folder done, with progress visible",
+    "Offline-capable, no internet required; must run on Windows and Linux (and macOS); implementation stack free",
+    "Product design keeps criteria pluggable so future criteria (education, location, language, titles, companies, per-skill experience, include/exclude keywords) add without workflow redesign"
+  ],
+  "assumptions": [
+    "Backend and resume folder on same machine; user supplies absolute or relative local path, app validates readability",
+    "Text-based PDF/DOCX only; scanned-image PDFs without extractable text treated as unprocessable and reported as Undetermined, no OCR in v1",
+    "Jalali date in folder name uses YYYY-MM-DD format",
+    "Excel report is .xlsx with two sections or sheets: summary header plus per-resume table"
+  ],
+  "outOfScope": [
+    "Legacy .doc, RTF, TXT, or other formats",
+    "OCR for scanned images",
+    "Cloud storage, remote URLs, email ingestion",
+    "Multi-user auth, roles, recruiter collaboration",
+    "Future criteria: education, university, location, language proficiency, job titles, companies/industries, per-technology experience, include/exclude keyword sets"
+  ],
+  "successCriteria": [
+    "User screens folder of PDF/DOCX resumes by experience and/or keywords and gets qualified copies plus full Excel report",
+    "Every resume decision has visible reason; unknown info labeled Undetermined not silently rejected",
+    "Originals untouched; output folder with Jalali date created inside source folder"
+  ],
+  "openQuestions": [
+    "Exact Excel columns and sheet layout to freeze in PRD?",
+    "Output folder collision rule if dated folder already exists (suffix, overwrite, new run)?",
+    "Handling of password-protected, corrupt, or unreadable files: count as Undetermined with reason?",
+    "Subfolder recursion: process only top-level folder or include subfolders?",
+    "Progress UI details for chunked run: cancel/retry needed in v1?"
+  ]
+}
