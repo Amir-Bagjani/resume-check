@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Resume Screening</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="app-header">
+  <h1>Resume Screening</h1>
+  <p>Bulk-screen a local folder of PDF/DOCX resumes by experience and required keywords. Originals are never modified.</p>
+</header>
+
+<main>
+  <!-- Setup screen -->
+  <section id="screen-setup" aria-labelledby="setup-heading">
+    <h2 id="setup-heading">1. Folder and criteria</h2>
+
+    <div class="card">
+      <h3><label for="folder-path">Resume folder path</label></h3>
+      <p id="folder-help" class="help">Same-machine local path, e.g. <code>/data/resumes</code>. Only top-level <code>.pdf</code> / <code>.docx</code> files are scanned; subfolders and other extensions are ignored. No OCR in v1.</p>
+      <div class="row">
+        <input id="folder-path" type="text" dir="ltr" autocomplete="off" spellcheck="false"
+               aria-describedby="folder-help folder-status" placeholder="/data/resumes">
+        <button id="scan-btn" type="button">Validate / Scan</button>
+      </div>
+      <p id="folder-status" class="status" role="status" aria-live="polite"></p>
+    </div>
+
+    <div class="card">
+      <h3 id="criteria-heading">Screening criteria</h3>
+      <p class="help" id="criteria-help">Each criterion is optional, but at least one is required to start.</p>
+      <div class="row">
+        <label for="min-years">Minimum years of experience (optional)</label>
+        <input id="min-years" type="number" min="0" max="60" step="0.5" inputmode="decimal" aria-describedby="criteria-help">
+      </div>
+      <div class="row">
+        <label for="keyword-input">Required technologies / keywords</label>
+      </div>
+      <div class="row">
+        <input id="keyword-input" type="text" autocomplete="off" spellcheck="false" placeholder="e.g. React" aria-describedby="criteria-help">
+        <button id="keyword-add-btn" type="button">Add</button>
+      </div>
+      <ul id="keyword-chips" class="chips" aria-label="Required keywords"></ul>
+      <p class="help future-note">Extensible: future criteria (education, location, titles, …) plug in here without workflow redesign.</p>
+    </div>
+
+    <div class="card">
+      <button id="start-btn" type="button" disabled>Start screening</button>
+      <p id="start-hint" class="help">Select a valid folder with resumes and set at least one criterion to start.</p>
+      <div id="setup-error" class="error" role="alert" tabindex="-1" hidden></div>
+    </div>
+  </section>
+
+  <!-- Progress screen -->
+  <section id="screen-progress" aria-labelledby="progress-heading" hidden>
+    <h2 id="progress-heading">2. Screening in progress</h2>
+    <div class="card">
+      <p><strong>Folder:</strong> <code id="progress-folder" dir="ltr"></code></p>
+      <p><strong>Criteria:</strong> <span id="progress-criteria"></span></p>
+      <div class="progress-wrap">
+        <div id="progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Screening progress">
+          <div id="progress-fill"></div>
+        </div>
+        <p id="progress-text" class="status" role="status" aria-live="polite">0 / 0 (0%)</p>
+      </div>
+      <ul id="progress-counters" class="cards" aria-label="Live counters">
+        <li>Processed: <strong id="c-processed">0</strong></li>
+        <li>Qualified: <strong id="c-qualified">0</strong></li>
+        <li>Not qualified: <strong id="c-not">0</strong></li>
+        <li>Undetermined: <strong id="c-und">0</strong></li>
+      </ul>
+      <p class="help">Processing <span id="progress-current">—</span> · 10 files at a time. Unreadable files are marked Undetermined without stopping the run.</p>
+      <div class="row">
+        <button id="pause-btn" type="button">Pause</button>
+        <button id="cancel-btn" type="button">Cancel</button>
+      </div>
+      <p class="help">Cancel stops remaining files but keeps partial results and a report for processed files.</p>
+      <p id="progress-error" class="error" role="alert" hidden></p>
+    </div>
+  </section>
+
+  <!-- Results screen -->
+  <section id="screen-results" aria-labelledby="results-heading" hidden>
+    <h2 id="results-heading">3. Results</h2>
+    <div class="card">
+      <ul id="summary-cards" class="cards" aria-label="Run summary">
+        <li>Found: <strong id="s-found">0</strong></li>
+        <li>Processed: <strong id="s-processed">0</strong></li>
+        <li>Qualified: <strong id="s-qualified">0</strong></li>
+        <li>Not qualified: <strong id="s-not">0</strong></li>
+        <li>Undetermined: <strong id="s-und">0</strong></li>
+      </ul>
+      <p><strong>Output folder:</strong> <code id="output-path" dir="ltr">—</code>
+        <button id="copy-path-btn" type="button">Copy path</button></p>
+      <p class="help" id="copy-confirm" role="status" aria-live="polite"></p>
+      <p><strong>Report:</strong> <code id="report-name" dir="ltr">—</code></p>
+      <p><strong>Criteria used:</strong> <span id="results-criteria">—</span></p>
+      <p><strong>Screening date:</strong> <span id="results-date">—</span></p>
+      <p id="empty-qualified-notice" class="status" hidden>No resumes qualified — nothing was copied, but the Excel report was still generated.</p>
+      <p id="results-error" class="error" role="alert" hidden></p>
+    </div>
+
+    <div class="card">
+      <h3 id="table-heading">Per-resume breakdown</h3>
+      <div class="row" role="group" aria-label="Filter by status">
+        <button type="button" class="filter-chip" data-filter="all" aria-pressed="true">All</button>
+        <button type="button" class="filter-chip" data-filter="Qualified" aria-pressed="false">Qualified</button>
+        <button type="button" class="filter-chip" data-filter="Not Qualified" aria-pressed="false">Not Qualified</button>
+        <button type="button" class="filter-chip" data-filter="Undetermined" aria-pressed="false">Undetermined</button>
+        <label for="table-search" class="visually-hidden">Search results</label>
+        <input id="table-search" type="search" placeholder="Search filename, name, reason…" autocomplete="off">
+      </div>
+      <p id="results-count" class="help" role="status" aria-live="polite"></p>
+      <div class="table-scroll">
+        <table id="results-table">
+          <caption>One row per processed resume with decision reason</caption>
+          <thead>
+            <tr>
+              <th scope="col">File</th>
+              <th scope="col">Candidate</th>
+              <th scope="col">Years</th>
+              <th scope="col">Experience</th>
+              <th scope="col">Skills detected</th>
+              <th scope="col">Required found</th>
+              <th scope="col">Required missing</th>
+              <th scope="col">Result</th>
+              <th scope="col">Reason</th>
+            </tr>
+          </thead>
+          <tbody id="results-body"></tbody>
+        </table>
+      </div>
+      <div class="row">
+        <button id="new-run-btn" type="button">Start new screening</button>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script src="js/app_setup.js"></script>
+<script src="js/app_progress.js"></script>
+<script src="js/app_results.js"></script>
+</body>
+</html>
