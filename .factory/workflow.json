@@ -1,0 +1,915 @@
+{
+  "id": "software-factory/default",
+  "version": "0.5.0",
+  "definition": {
+    "kind": "workflow-definition",
+    "id": "software-factory/default",
+    "name": "Software Factory default workflow",
+    "version": "0.5.0",
+    "description": "The happy path of the factory: an idea is clarified into a PRD, designed, architected, implemented, tested, and delivered. Every state that produces a decision-bearing artifact stops for human approval before the workflow advances.",
+    "initialState": "CREATED",
+    "terminalStates": [
+      "DONE"
+    ],
+    "notes": [
+      "A state advances only after its required artifacts exist, validate against their schema, and (when requiresApproval is true) are approved.",
+      "Failures are not states. They are a property of the run (status, attempt, last_error) so that a failed attempt never loses its place in the workflow. See workflow-design.md, 'Failure and retry'.",
+      "owner ids match file basenames under .opencode/agents/.",
+      "input.artifacts entries carry a required flag. Only required inputs must be produced by an earlier state; optional inputs are context the orchestrator supplies when it exists.",
+      "allowedActions vocabulary: readArtifacts, writeArtifact, writeTests, writeSource, runTests, askUser, readMemory, writeMemory. 'approve' is deliberately absent: only the orchestrator finalizes approval.",
+      "capability vocabulary: network, shell, sourceWrite, testExecution, packageInstall. A capability is what the execution environment grants a run, not what an agent is allowed to want. requiresCapabilities is unmet capability handling is declared per agent as fallbackWhenUnavailable; when absent, an unmet requirement blocks the run.",
+      "executionProfile names a runtime profile in packages/agent-runtime: which image, which paths are writable, which network mode, and whether package installation is allowed. A profile is a policy; the execution backend either applies it or refuses.",
+      "An agent proposes an artifact. The orchestrator validates it, persists it, and owns status and approved. See agent-protocol.md section 10.",
+      "completion.* declares what must be true before a state may be left. The orchestrator gathers the facts and packages/workflow evaluates them; no file outside the definition knows what any particular state requires.",
+      "IMPLEMENTATION requires an approved change proposal *and* an applied one. Approval is a statement about a diff; application is a statement about the project. Treating them as one requirement would let the workflow advance over code that is still in a workspace.",
+      "QA accepts a conditional test report only with a recorded human override. The verdict itself is not a workflow fact — whether an unverified result may pass is a policy, and it is declared.",
+      "IMPLEMENTATION leaves on `accepted`, not on `approved`. A reviewer who agrees to a diff has not accepted the finished product, and the two decisions are recorded separately: see IMPLEMENTATION.completion.",
+      "There is no QA state on the delivery path. Final acceptance of the built project is a human decision bound to a project commit."
+    ],
+    "agents": {
+      "product-manager": {
+        "executionProfile": "discovery",
+        "name": "Product Manager",
+        "responsibility": "Turn a vague idea into confirmed, testable product requirements.",
+        "configPath": ".opencode/agents/product-manager.md",
+        "status": "active",
+        "requiredSkills": [
+          "grilling",
+          "product-discovery",
+          "opportunity-solution-tree",
+          "create-prd",
+          "user-stories",
+          "deliver-acceptance-criteria"
+        ],
+        "skillRoot": ".agents/skills",
+        "inputArtifacts": [
+          "IDEA",
+          "DISCOVERY"
+        ],
+        "outputArtifacts": [
+          "DISCOVERY",
+          "PRD"
+        ],
+        "allowedActions": [
+          "readArtifacts",
+          "writeArtifact",
+          "askUser",
+          "readMemory",
+          "writeMemory"
+        ],
+        "requiresCapabilities": []
+      },
+      "designer": {
+        "executionProfile": "design",
+        "name": "Product Designer",
+        "responsibility": "Turn approved requirements into screens, flows, and interaction behaviour.",
+        "configPath": ".opencode/agents/designer.md",
+        "status": "active",
+        "requiredSkills": [
+          "wireframe-spec",
+          "html-wireframe",
+          "ui-ux-pro-max",
+          "accessibility"
+        ],
+        "skillRoot": ".agents/skills",
+        "inputArtifacts": [
+          "PRD"
+        ],
+        "outputArtifacts": [
+          "WIREFRAME"
+        ],
+        "allowedActions": [
+          "readArtifacts",
+          "writeArtifact",
+          "askUser",
+          "readMemory",
+          "writeMemory"
+        ],
+        "requiresCapabilities": []
+      },
+      "architect": {
+        "executionProfile": "architecture",
+        "name": "Software Architect",
+        "responsibility": "Decide the technology stack, component boundaries, and contracts, then break the work into tasks.",
+        "configPath": ".opencode/agents/architect.md",
+        "status": "active",
+        "requiredSkills": [
+          "software-architecture",
+          "improve-codebase-architecture",
+          "ponytail",
+          "api-design-principles",
+          "task-decomposition"
+        ],
+        "skillRoot": ".agents/skills",
+        "inputArtifacts": [
+          "PRD",
+          "WIREFRAME"
+        ],
+        "outputArtifacts": [
+          "ARCHITECTURE"
+        ],
+        "allowedActions": [
+          "readArtifacts",
+          "writeArtifact",
+          "askUser",
+          "readMemory",
+          "writeMemory"
+        ],
+        "requiresCapabilities": []
+      },
+      "frontend-developer": {
+        "name": "Frontend Developer",
+        "responsibility": "Implement approved frontend tasks against the approved design and API contracts.",
+        "configPath": ".opencode/agents/frontend-developer.md",
+        "status": "active",
+        "requiredSkills": [
+          "test-driven-development",
+          "systematic-debugging",
+          "verification-before-completion",
+          "executing-plans",
+          "ponytail",
+          "using-git-worktrees",
+          "receiving-code-review"
+        ],
+        "skillRoot": ".agents/skills",
+        "inputArtifacts": [
+          "PRD",
+          "WIREFRAME",
+          "ARCHITECTURE"
+        ],
+        "outputArtifacts": [
+          "SOURCE"
+        ],
+        "allowedActions": [
+          "readArtifacts",
+          "writeSource",
+          "writeTests",
+          "runTests",
+          "askUser",
+          "readMemory"
+        ],
+        "requiresCapabilities": [
+          "sourceWrite",
+          "testExecution"
+        ],
+        "executionProfile": "development-node"
+      },
+      "backend-developer": {
+        "name": "Backend Developer",
+        "responsibility": "Implement approved backend tasks against the approved API and data contracts.",
+        "configPath": ".opencode/agents/backend-developer.md",
+        "status": "active",
+        "requiredSkills": [
+          "test-driven-development",
+          "systematic-debugging",
+          "verification-before-completion",
+          "executing-plans",
+          "ponytail",
+          "api-design-principles",
+          "using-git-worktrees",
+          "receiving-code-review"
+        ],
+        "skillRoot": ".agents/skills",
+        "inputArtifacts": [
+          "PRD",
+          "WIREFRAME",
+          "ARCHITECTURE"
+        ],
+        "outputArtifacts": [
+          "SOURCE"
+        ],
+        "allowedActions": [
+          "readArtifacts",
+          "writeSource",
+          "writeTests",
+          "runTests",
+          "askUser",
+          "readMemory"
+        ],
+        "requiresCapabilities": [
+          "sourceWrite",
+          "testExecution"
+        ],
+        "executionProfile": "development-node"
+      },
+      "qa-agent": {
+        "name": "QA Agent",
+        "responsibility": "Verify the implementation against the approved acceptance criteria and report the result with evidence.",
+        "configPath": ".opencode/agents/qa-agent.md",
+        "status": "active",
+        "requiredSkills": [
+          "test-driven-development",
+          "deliver-acceptance-criteria",
+          "systematic-debugging",
+          "verification-before-completion",
+          "api-design-principles",
+          "accessibility"
+        ],
+        "skillRoot": ".agents/skills",
+        "skillNotes": {
+          "test-driven-development": "Writing new test cases; see its writing-good-tests.md reference.",
+          "deliver-acceptance-criteria": "Turning an approved criterion into a verifiable Given/When/Then scenario. Written for QA sign-off.",
+          "api-design-principles": "Only for projects with a server: checking the implementation against the approved API contracts.",
+          "accessibility": "Only for projects with a user interface: checking the shipped UI against WCAG 2.2 AA."
+        },
+        "inputArtifacts": [
+          "PRD",
+          "ARCHITECTURE",
+          "SOURCE"
+        ],
+        "optionalInputArtifacts": [
+          "TEST_REPORT",
+          "BUGS"
+        ],
+        "outputArtifacts": [
+          "TEST_REPORT"
+        ],
+        "allowedActions": [
+          "readArtifacts",
+          "writeTests",
+          "runTests",
+          "askUser",
+          "readMemory"
+        ],
+        "requiresCapabilities": [
+          "testExecution"
+        ],
+        "executionProfile": "qa-node",
+        "fallbackWhenUnavailable": {
+          "allowed": true,
+          "verdict": "conditional",
+          "reportUnverifiedCriteria": true,
+          "note": "Missing infrastructure is not an agent failure and not a hallucination. The honest report is a conditional verdict listing the criteria it could not exercise. An unavailable capability must never be recorded as a failed QA run."
+        },
+        "boundaries": {
+          "mayNotWrite": [
+            "source/"
+          ],
+          "reason": "A bug the agent fixes itself is a bug nobody sees. QA reports defects; the developers repair them.",
+          "mayNotApprove": true
+        }
+      }
+    },
+    "states": [
+      {
+        "id": "CREATED",
+        "title": "Project created",
+        "purpose": "A workspace exists and the user has stated an idea. No agent has been involved yet.",
+        "owners": [],
+        "input": {
+          "artifacts": [],
+          "userInput": [
+            "projectName",
+            "idea"
+          ]
+        },
+        "output": {
+          "artifacts": [
+            {
+              "type": "PROJECT",
+              "path": ".factory/project.json",
+              "schema": "project-schema.json",
+              "kind": "file"
+            },
+            {
+              "type": "IDEA",
+              "path": "product/idea.md",
+              "schema": null,
+              "kind": "file"
+            }
+          ]
+        },
+        "requiresApproval": false,
+        "approvalScope": [],
+        "onError": {
+          "action": "halt",
+          "maxAttempts": 1
+        },
+        "completion": {
+          "gatedEvents": [
+            "start"
+          ],
+          "override": {
+            "allowed": false
+          },
+          "requirements": [
+            {
+              "id": "project-initialized",
+              "project": {
+                "exists": true,
+                "valid": true,
+                "consistent": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "DISCOVERY",
+        "title": "Product discovery",
+        "purpose": "Turn a vague idea into confirmed requirements: problem, users, scope, constraints, open questions.",
+        "owners": [
+          "product-manager"
+        ],
+        "input": {
+          "artifacts": [
+            {
+              "type": "IDEA",
+              "required": true
+            }
+          ],
+          "userInput": [
+            "answers"
+          ]
+        },
+        "output": {
+          "artifacts": [
+            {
+              "type": "DISCOVERY",
+              "path": "product/discovery.json",
+              "schema": "artifacts/DISCOVERY.schema.json",
+              "kind": "file"
+            }
+          ]
+        },
+        "requiresApproval": true,
+        "approvalScope": [
+          "confirmed requirements",
+          "MVP scope",
+          "open questions"
+        ],
+        "onError": {
+          "action": "retry",
+          "maxAttempts": 3
+        },
+        "completion": {
+          "gatedEvents": [
+            "approved"
+          ],
+          "override": {
+            "allowed": false
+          },
+          "requirements": [
+            {
+              "id": "discovery-approved",
+              "artifact": {
+                "type": "DISCOVERY",
+                "status": "approved"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "PRD",
+        "title": "Product requirements",
+        "purpose": "Produce the authoritative product specification, with testable acceptance criteria.",
+        "owners": [
+          "product-manager"
+        ],
+        "input": {
+          "artifacts": [
+            {
+              "type": "IDEA",
+              "required": true
+            },
+            {
+              "type": "DISCOVERY",
+              "required": true
+            }
+          ],
+          "userInput": [
+            "answers"
+          ]
+        },
+        "output": {
+          "artifacts": [
+            {
+              "type": "PRD",
+              "path": "product/prd.json",
+              "schema": "artifacts/prd.schema.json",
+              "kind": "file"
+            }
+          ]
+        },
+        "requiresApproval": true,
+        "approvalScope": [
+          "product requirements",
+          "user stories",
+          "acceptance criteria"
+        ],
+        "onError": {
+          "action": "retry",
+          "maxAttempts": 3
+        },
+        "completion": {
+          "gatedEvents": [
+            "approved"
+          ],
+          "override": {
+            "allowed": false
+          },
+          "requirements": [
+            {
+              "id": "prd-approved",
+              "artifact": {
+                "type": "PRD",
+                "status": "approved",
+                "requireValid": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "DESIGN",
+        "title": "Design",
+        "purpose": "Describe screens, flows, and interactions at the fidelity the project needs.",
+        "owners": [
+          "designer"
+        ],
+        "input": {
+          "artifacts": [
+            {
+              "type": "PRD",
+              "required": true
+            }
+          ],
+          "userInput": [
+            "answers"
+          ]
+        },
+        "output": {
+          "artifacts": [
+            {
+              "type": "WIREFRAME",
+              "path": "design/wireframe.json",
+              "schema": "artifacts/WIREFRAME.schema.json",
+              "kind": "file"
+            }
+          ]
+        },
+        "requiresApproval": true,
+        "approvalScope": [
+          "screens",
+          "user flows",
+          "interaction states"
+        ],
+        "onError": {
+          "action": "retry",
+          "maxAttempts": 3
+        },
+        "skip": {
+          "allowed": true,
+          "reason": "Projects with no user interface do not need a design.",
+          "producedBy": "orchestrator",
+          "recordsArtifact": {
+            "type": "DESIGN_SKIPPED",
+            "path": "design/skipped.json"
+          }
+        },
+        "completion": {
+          "gatedEvents": [
+            "approved",
+            "skipped"
+          ],
+          "override": {
+            "allowed": false
+          },
+          "requirements": [
+            {
+              "id": "design-output-reviewed",
+              "anyOf": [
+                {
+                  "artifact": {
+                    "type": "WIREFRAME",
+                    "status": "approved"
+                  }
+                },
+                {
+                  "artifact": {
+                    "type": "DESIGN_SKIPPED",
+                    "status": "approved"
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "id": "ARCHITECTURE",
+        "title": "Architecture",
+        "purpose": "Decide the technology stack, components, contracts, and deployment, then break the work into tasks.",
+        "owners": [
+          "architect"
+        ],
+        "input": {
+          "artifacts": [
+            {
+              "type": "PRD",
+              "required": true
+            },
+            {
+              "type": "WIREFRAME",
+              "required": false,
+              "note": "absent when DESIGN was skipped"
+            }
+          ],
+          "userInput": [
+            "answers"
+          ]
+        },
+        "output": {
+          "artifacts": [
+            {
+              "type": "ARCHITECTURE",
+              "path": "architecture/architecture.json",
+              "schema": "artifacts/architecture.schema.json",
+              "kind": "file"
+            }
+          ]
+        },
+        "requiresApproval": true,
+        "approvalScope": [
+          "technology stack",
+          "component boundaries",
+          "API contracts",
+          "task breakdown"
+        ],
+        "onError": {
+          "action": "retry",
+          "maxAttempts": 3
+        },
+        "completion": {
+          "gatedEvents": [
+            "approved"
+          ],
+          "override": {
+            "allowed": false
+          },
+          "requirements": [
+            {
+              "id": "architecture-approved",
+              "artifact": {
+                "type": "ARCHITECTURE",
+                "status": "approved",
+                "requireValid": true
+              }
+            }
+          ]
+        }
+      },
+      {
+        "id": "IMPLEMENTATION",
+        "title": "Implementation",
+        "purpose": "Write the source code for the approved tasks, inside the isolated project environment.",
+        "owners": [
+          "frontend-developer",
+          "backend-developer"
+        ],
+        "input": {
+          "artifacts": [
+            {
+              "type": "PRD",
+              "required": true
+            },
+            {
+              "type": "WIREFRAME",
+              "required": false,
+              "note": "absent when DESIGN was skipped"
+            },
+            {
+              "type": "ARCHITECTURE",
+              "required": true
+            },
+            {
+              "type": "REVIEW_FEEDBACK",
+              "required": false,
+              "note": "the reviewer's own words, when they asked for changes. This is the whole of what a human said, kept as written — it is the correction's instruction, and it is written by a person rather than by an agent, so it is not shaped like a document."
+            }
+          ],
+          "userInput": [
+            "answers"
+          ]
+        },
+        "output": {
+          "artifacts": [
+            {
+              "type": "SOURCE",
+              "path": "source/",
+              "schema": null,
+              "kind": "directory"
+            }
+          ]
+        },
+        "requiresApproval": false,
+        "approvalScope": [
+          "the change proposal's diff",
+          "which files it touches",
+          "whether the work is accepted into the project"
+        ],
+        "onError": {
+          "action": "retry",
+          "maxAttempts": 3
+        },
+        "execution": {
+          "isolated": true,
+          "environment": "node-runner",
+          "parallelism": "per task, only for tasks declared independent by the architect"
+        },
+        "completion": {
+          "gatedEvents": [
+            "accepted"
+          ],
+          "override": {
+            "allowed": false,
+            "reason": "the product is accepted by a person or it is not delivered"
+          },
+          "requirements": [
+            {
+              "id": "implementation-changes-reviewed",
+              "changeProposal": {
+                "status": "approved"
+              },
+              "note": "a human agreed to a diff. This is not the same decision as accepting the finished product, which is the next requirement, and it does not satisfy it."
+            },
+            {
+              "id": "implementation-changes-applied",
+              "changeProposal": {
+                "applied": true
+              }
+            },
+            {
+              "id": "human-accepted-the-project",
+              "acceptance": {
+                "decision": "approved",
+                "subjectCommit": "$projectHead"
+              },
+              "note": "the built software, accepted by a person, at the commit they were shown. A successful agent run cannot satisfy this and neither can an approved diff."
+            }
+          ]
+        },
+        "notes": [
+          "requiresApproval is false here because this state approves no document. Its human gates are two distinct decisions, and keeping them distinct is the point: a reviewer who agrees to one commit's diff has not thereby accepted the product, and the workflow must not record that they had.",
+          "`accepted` is the gated event. It is what a person means by accepting a project, and it requires the four requirements above: work produced, work reviewed, work applied, product accepted.",
+          "IMPLEMENTATION -> IMPLEMENTATION on `changes_requested` is a human-requested correction, not an automated loop. Nothing enters it on its own; the engineer's next run exists only because someone asked for one, and control returns to that person afterwards."
+        ]
+      },
+      {
+        "id": "QA",
+        "title": "Quality assurance",
+        "purpose": "Verify the implementation against the approved acceptance criteria and report the result honestly.",
+        "owners": [
+          "qa-agent"
+        ],
+        "input": {
+          "artifacts": [
+            {
+              "type": "PRD",
+              "path": "product/prd.json",
+              "required": true
+            },
+            {
+              "type": "ARCHITECTURE",
+              "path": "architecture/architecture.json",
+              "required": true
+            },
+            {
+              "type": "SOURCE",
+              "path": "source/",
+              "kind": "directory",
+              "required": true
+            },
+            {
+              "type": "TEST_REPORT",
+              "path": "tests/test-report.json",
+              "required": false,
+              "note": "the previous report, used to re-test known failures and catch regressions"
+            },
+            {
+              "type": "BUGS",
+              "path": "tests/bugs.json",
+              "required": false,
+              "note": "prior defect reports"
+            }
+          ],
+          "userInput": [
+            "answers"
+          ]
+        },
+        "output": {
+          "artifacts": [
+            {
+              "type": "TEST_REPORT",
+              "path": "tests/test-report.json",
+              "schema": "artifacts/test-report.schema.json",
+              "kind": "file"
+            }
+          ]
+        },
+        "requiresApproval": true,
+        "approvalScope": [
+          "test results",
+          "unverified criteria",
+          "open bugs",
+          "recommendations"
+        ],
+        "onError": {
+          "action": "retry",
+          "maxAttempts": 2
+        },
+        "invocation": {
+          "container": "node-runner",
+          "readOnlyRepository": true,
+          "note": "The agent may write tests and reports, and may run the project's test command. It may not write under source/; see agents['qa-agent'].boundaries."
+        },
+        "completion": {
+          "gatedEvents": [
+            "approved"
+          ],
+          "override": {
+            "allowed": true,
+            "reason": "a conditional test report is accepted or refused by a human"
+          },
+          "requirements": [
+            {
+              "id": "qa-report-approved",
+              "artifact": {
+                "type": "TEST_REPORT",
+                "status": "approved",
+                "requireValid": true
+              }
+            },
+            {
+              "id": "qa-conditional-accepted",
+              "artifact": {
+                "type": "TEST_REPORT",
+                "status": "approved"
+              },
+              "when": {
+                "artifactField": {
+                  "type": "TEST_REPORT",
+                  "path": "verdict",
+                  "equals": "conditional"
+                }
+              },
+              "requiresOverride": true
+            }
+          ]
+        },
+        "notes": [
+          "QA is not part of the MVP delivery path. Autonomous verification was attempted and removed: it cost more model budget than it returned and, when it worked, its verdict was a second opinion about work a person had already reviewed. Nothing transitions into this state and DONE does not require its report.",
+          "The state is kept rather than deleted so that the contract, the schema and the agent remain available as an explicit, opt-in experiment. See notes.deferredContracts for what else is parked.",
+          "Final acceptance of the built project is a human decision recorded against a project commit; see IMPLEMENTATION.completion and the `acceptance` requirement kind."
+        ],
+        "status": "experimental",
+        "optional": true
+      },
+      {
+        "id": "DONE",
+        "title": "Delivered",
+        "purpose": "The project is delivered. Nothing further is expected of the agents.",
+        "owners": [],
+        "input": {
+          "artifacts": [
+            {
+              "type": "REVIEW_FEEDBACK",
+              "required": false,
+              "note": "the reviewer's last words, kept as history. DONE requires no document."
+            }
+          ],
+          "userInput": []
+        },
+        "output": {
+          "artifacts": []
+        },
+        "requiresApproval": false,
+        "approvalScope": [],
+        "onError": {
+          "action": "halt",
+          "maxAttempts": 1
+        },
+        "completion": {
+          "gatedEvents": [],
+          "override": {
+            "allowed": false
+          },
+          "requirements": []
+        },
+        "notes": [
+          "DONE is reached by a recorded human acceptance of the built project, not by a document and not by a test report. The acceptance is bound to the project commit, so a project that changes afterwards is no longer delivered."
+        ]
+      }
+    ],
+    "transitions": [
+      {
+        "from": "CREATED",
+        "on": "start",
+        "to": "DISCOVERY"
+      },
+      {
+        "from": "DISCOVERY",
+        "on": "approved",
+        "to": "PRD"
+      },
+      {
+        "from": "DISCOVERY",
+        "on": "changes_requested",
+        "to": "DISCOVERY",
+        "maxCycles": 5
+      },
+      {
+        "from": "DISCOVERY",
+        "on": "rejected",
+        "to": null,
+        "action": "halt"
+      },
+      {
+        "from": "PRD",
+        "on": "approved",
+        "to": "DESIGN"
+      },
+      {
+        "from": "PRD",
+        "on": "changes_requested",
+        "to": "PRD",
+        "maxCycles": 5
+      },
+      {
+        "from": "PRD",
+        "on": "rejected",
+        "to": null,
+        "action": "halt"
+      },
+      {
+        "from": "DESIGN",
+        "on": "approved",
+        "to": "ARCHITECTURE"
+      },
+      {
+        "from": "DESIGN",
+        "on": "changes_requested",
+        "to": "DESIGN",
+        "maxCycles": 5
+      },
+      {
+        "from": "DESIGN",
+        "on": "rejected",
+        "to": null,
+        "action": "halt"
+      },
+      {
+        "from": "DESIGN",
+        "on": "skipped",
+        "to": "ARCHITECTURE",
+        "recordedBy": "orchestrator"
+      },
+      {
+        "from": "ARCHITECTURE",
+        "on": "approved",
+        "to": "IMPLEMENTATION"
+      },
+      {
+        "from": "ARCHITECTURE",
+        "on": "changes_requested",
+        "to": "ARCHITECTURE",
+        "maxCycles": 5
+      },
+      {
+        "from": "ARCHITECTURE",
+        "on": "rejected",
+        "to": null,
+        "action": "halt"
+      },
+      {
+        "from": "IMPLEMENTATION",
+        "on": "changes_requested",
+        "to": "IMPLEMENTATION",
+        "note": "a human asked for changes. Not an automatic loop: the engineer's run happens because someone requested one, and control returns to that person when it is applied."
+      },
+      {
+        "from": "IMPLEMENTATION",
+        "on": "rejected",
+        "to": null,
+        "action": "halt"
+      },
+      {
+        "from": "IMPLEMENTATION",
+        "on": "accepted",
+        "to": "DONE",
+        "note": "a person accepted the built project at the commit they were shown"
+      }
+    ],
+    "deferredContracts": [
+      "BUGS",
+      "DESIGN_SKIPPED",
+      "IDEA",
+      "REVIEW_FEEDBACK",
+      "SOURCE"
+    ],
+    "projectLayout": {
+      "documentedIn": "workflow-design.md"
+    }
+  }
+}
