@@ -34,9 +34,9 @@ jobs:
       - name: Build
         run: |
           python -m pip install --upgrade pip
-          pip install -r source/backend/requirements.txt "pyinstaller==6.22.3"
-          rm -rf build dist
-          pyinstaller --noconfirm packaging/resumecheck.spec
+          python -m pip install -r source/backend/requirements.txt "pyinstaller==6.22.3"
+          python -c "import shutil; [shutil.rmtree(d, ignore_errors=True) for d in ('build', 'dist')]"
+          python -m PyInstaller --noconfirm packaging/resumecheck.spec
       - name: Smoke test (Windows)
         if: runner.os == 'Windows'
         run: |
@@ -44,8 +44,8 @@ jobs:
       - name: Smoke test (macOS/Linux)
         if: runner.os != 'Windows'
         run: |
-          uv sync --group ci 2>/dev/null || pip install requests >/dev/null
-          python packaging/smoke.py '${{ matrix.exe }}'
+          python -m pip install --quiet requests python-docx
+          python packaging/smoke.py "${{ matrix.exe }}"
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}

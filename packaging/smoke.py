@@ -58,7 +58,17 @@ def _instance_port() -> int | None:
         return None
 
 
+def _resolve_exe(exe: str) -> str:
+    # macOS CI passes the .app bundle; the real binary lives inside it.
+    if exe.endswith(".app"):
+        inner = os.path.join(exe, "Contents", "MacOS", "ResumeCheck")
+        if os.path.isfile(inner):
+            return inner
+    return exe
+
+
 def main(exe: str) -> int:
+    exe = _resolve_exe(exe)
     env = dict(os.environ, RESUMECHECK_HEADLESS="1")
     log = open("smoke-server.log", "ab")
     proc = subprocess.Popen(
