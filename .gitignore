@@ -1,0 +1,21 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# start.sh runtime artifacts
+.server.pid
+.server.log
+
+# PyInstaller packaging artifacts
+dist/
+build/
+.venv-pkg/
+packaging/__pycache__/
+!packaging/resumecheck.spec
+
+# local noise
+.DS_Store
+smoke*.log
+.factory/artifacts.json
+.vscode/

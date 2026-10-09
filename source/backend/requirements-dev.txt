@@ -1,0 +1,5 @@
+# Test-only dependencies. Install with:
+#   pip install -r backend/requirements.txt -r backend/requirements-dev.txt
+# reportlab generates the PDF fixtures used by the extraction tests.
+-r requirements.txt
+reportlab==4.2.5

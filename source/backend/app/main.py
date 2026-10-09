@@ -1,14 +1,13 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pathlib import Path
 
+from .paths import frontend_dir
 from .routes_runs import router as runs_router
 
 app = FastAPI(title="Resume Screening API")
 
 app.include_router(runs_router, prefix="/api")
-
-frontend_dir = Path(__file__).parent.parent.parent / "frontend"
 
 
 @app.get("/api/health")
@@ -16,6 +15,24 @@ def health():
     return {"status": "ok"}
 
 
+@app.middleware("http")
+async def loopback_guard(request: Request, call_next):
+    if request.url.path.startswith("/api/"):
+        host = (request.headers.get("host") or "").split(":")[0].lower()
+        if host not in ("127.0.0.1", "localhost", "::1", "testserver"):
+            return JSONResponse(status_code=403, content={"detail": "دسترسی مجاز نیست."})
+        origin = request.headers.get("origin")
+        if origin:
+            o = origin.lower()
+            if not (o.startswith("http://127.0.0.1") or o.startswith("http://localhost")):
+                return JSONResponse(status_code=403, content={"detail": "دسترسی مجاز نیست."})
+    return await call_next(request)
+
+
+_frontend = frontend_dir()
+if not _frontend.is_dir():
+    raise RuntimeError(f"پوشه رابط کاربری یافت نشد: {_frontend}")
+
 # ponytail: static mount last at root; html=True serves index.html at /,
 # and styles.css / js/*.js resolve relatively. API routes take precedence.
-app.mount("/", StaticFiles(directory=frontend_dir, html=True), name="frontend")
+app.mount("/", StaticFiles(directory=str(_frontend), html=True), name="frontend")

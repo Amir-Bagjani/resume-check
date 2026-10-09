@@ -1,1 +1,142 @@
-{"type":"WIREFRAME","projectId":"07ba90df-480f-4a2f-bad6-ab8785a69ac6","summary":"Single-page screening flow: folder setup plus criteria config, chunked progress with pause/cancel, results summary with output path and per-resume table mirroring Excel report.","fidelity":"annotated","screens":[{"id":"screening-setup","name":"Screening setup — folder plus criteria","purpose":"Point app at local resume folder and define at least one criterion before start.","sections":["App header with title and short description","Folder input block: path text field, Validate/Scan button, helper text noting same-machine path, top-level PDF/DOCX only","Folder status block: file count preview, validation message area","Criteria block: min years experience number input (optional), required keywords tag input with Add button and removable chips","Future-criteria placeholder note: extensible list area for later criteria without redesign","Start screening button plus blocked-hint text","Error area for folder and criteria validation"],"contentPriority":["Folder path input and file count","Start button enabled state plus at-least-one-criterion hint","Min experience input and keyword chips","Future-criteria extensibility note"],"states":["empty","loading","populated","error"],"interactions":["Submit path scans top-level PDF/DOCX only, shows count, ignores subfolders and other extensions","Start disabled until folder valid plus at least one criterion set; blocked attempt shows message requiring one criterion","Add keyword appends removable chip; duplicate and blank entries rejected","Clear or change folder resets count and disables start until revalidated","Zero supported files shows no-resumes error and keeps start disabled, creates no output"],"responsive":"Single column under 720px; criteria block stacks below folder block; chips wrap.","accessibility":["Labelled path and number inputs with describedby helper text","Keyword chips removable by keyboard with aria-label remove plus live-region announcement","Validation errors use role alert and move focus to error summary","Start disabled state announced, not color-only"]},{"id":"screening-progress","name":"Screening progress","purpose":"Show chunked bulk processing with control until run finishes or stops.","sections":["Progress header with folder path and active criteria recap","Progress bar with processed versus found counts and percent","Live counters: processed, qualified so far, not qualified so far, undetermined so far","Current file indicator and chunk note (10 at a time)","Pause/Resume and Cancel buttons","Partial findings note explaining cancel keeps processed results","Error banner area for unreadable-file handling"],"contentPriority":["Progress bar and counts","Pause/Resume and Cancel controls","Active criteria recap","Current file and chunk note"],"states":["loading","populated","error"],"interactions":["Processing advances in chunks of 10 with visible bar update","Pause freezes queue, button becomes Resume; Cancel stops remaining files and jumps to results with partial data","Unreadable files counted as Undetermined, never halt run","Cancel confirms before stopping when work remains"],"responsive":"Counters collapse to 2x2 grid on narrow screens; controls stay full-width touch targets.","accessibility":["Progress bar uses role progressbar with aria-valuenow and text equivalent","Pause/Cancel reachable by keyboard with visible focus; live region announces chunk completion without flooding screen reader","Status changes announced politely, errors assertively"]},{"id":"screening-results","name":"Results summary and per-resume breakdown","purpose":"Explain every resume outcome and point user at dated output folder plus Excel report.","sections":["Run summary cards: found, processed, qualified, not qualified, undetermined","Output location block: Jalali-dated folder path, copy-path button, report filename","Criteria-used recap plus screening Jalali/Gregorian date","Per-resume results table: filename, candidate name, estimated years, experience status, technologies detected, required found, required missing, final status, reason","Table filter and search: status filter chips (All/Qualified/Not Qualified/Undetermined) plus text search","Empty-qualified notice when zero qualified: no copies made, report still generated","Start new screening button"],"contentPriority":["Summary counts and output folder path","Per-resume table with reason column","Criteria recap and screening date","Filter controls and new-run action"],"states":["populated","empty","error"],"interactions":["Copy-path button copies output folder path with confirmation","Status filter and search narrow table rows without refetch","Row shows full reason text; long skills lists truncate with expand","Start new screening returns to setup preserving last folder and criteria","Failed run shows error state with retry, never links missing output"],"responsive":"Summary cards wrap to single column; table scrolls horizontally with sticky first column and status column; filters wrap.","accessibility":["Summary counts as list with text labels, not color-only","Table uses th scope, caption, and status text plus icon with aria-label","Filter chips use aria-pressed; search input labelled; results count announced in live region","Copy-path confirms via live region text"]}],"flows":[{"name":"Bulk screening run","steps":["screening-setup","screening-progress","screening-results"]}],"openQuestions":["Does results screen need full per-resume table in UI or summary counts plus Excel download suffice for v1?","Should Cancel take user to partial results screen or stay on progress with stopped state?","Preferred display for screening date: Jalali only or Jalali plus Gregorian side by side?"]}
+{
+  "type": "WIREFRAME",
+  "projectId": "07ba90df-480f-4a2f-bad6-ab8785a69ac6",
+  "summary": "Single-page screening flow: folder setup plus criteria config, chunked progress with pause/cancel, results summary with output path and per-resume table mirroring Excel report.",
+  "fidelity": "annotated",
+  "screens": [
+    {
+      "id": "screening-setup",
+      "name": "Screening setup — folder plus criteria",
+      "purpose": "Point app at local resume folder and define at least one criterion before start.",
+      "sections": [
+        "App header with title and short description",
+        "Folder input block: path text field, Validate/Scan button, helper text noting same-machine path, top-level PDF/DOCX only",
+        "Folder status block: file count preview, validation message area",
+        "Criteria block: min years experience number input (optional), required keywords tag input with Add button and removable chips",
+        "Future-criteria placeholder note: extensible list area for later criteria without redesign",
+        "Start screening button plus blocked-hint text",
+        "Error area for folder and criteria validation"
+      ],
+      "contentPriority": [
+        "Folder path input and file count",
+        "Start button enabled state plus at-least-one-criterion hint",
+        "Min experience input and keyword chips",
+        "Future-criteria extensibility note"
+      ],
+      "states": [
+        "empty",
+        "loading",
+        "populated",
+        "error"
+      ],
+      "interactions": [
+        "Submit path scans top-level PDF/DOCX only, shows count, ignores subfolders and other extensions",
+        "Start disabled until folder valid plus at least one criterion set; blocked attempt shows message requiring one criterion",
+        "Add keyword appends removable chip; duplicate and blank entries rejected",
+        "Clear or change folder resets count and disables start until revalidated",
+        "Zero supported files shows no-resumes error and keeps start disabled, creates no output"
+      ],
+      "responsive": "Single column under 720px; criteria block stacks below folder block; chips wrap.",
+      "accessibility": [
+        "Labelled path and number inputs with describedby helper text",
+        "Keyword chips removable by keyboard with aria-label remove plus live-region announcement",
+        "Validation errors use role alert and move focus to error summary",
+        "Start disabled state announced, not color-only"
+      ]
+    },
+    {
+      "id": "screening-progress",
+      "name": "Screening progress",
+      "purpose": "Show chunked bulk processing with control until run finishes or stops.",
+      "sections": [
+        "Progress header with folder path and active criteria recap",
+        "Progress bar with processed versus found counts and percent",
+        "Live counters: processed, qualified so far, not qualified so far, undetermined so far",
+        "Current file indicator and chunk note (10 at a time)",
+        "Pause/Resume and Cancel buttons",
+        "Partial findings note explaining cancel keeps processed results",
+        "Error banner area for unreadable-file handling"
+      ],
+      "contentPriority": [
+        "Progress bar and counts",
+        "Pause/Resume and Cancel controls",
+        "Active criteria recap",
+        "Current file and chunk note"
+      ],
+      "states": [
+        "loading",
+        "populated",
+        "error"
+      ],
+      "interactions": [
+        "Processing advances in chunks of 10 with visible bar update",
+        "Pause freezes queue, button becomes Resume; Cancel stops remaining files and jumps to results with partial data",
+        "Unreadable files counted as Undetermined, never halt run",
+        "Cancel confirms before stopping when work remains"
+      ],
+      "responsive": "Counters collapse to 2x2 grid on narrow screens; controls stay full-width touch targets.",
+      "accessibility": [
+        "Progress bar uses role progressbar with aria-valuenow and text equivalent",
+        "Pause/Cancel reachable by keyboard with visible focus; live region announces chunk completion without flooding screen reader",
+        "Status changes announced politely, errors assertively"
+      ]
+    },
+    {
+      "id": "screening-results",
+      "name": "Results summary and per-resume breakdown",
+      "purpose": "Explain every resume outcome and point user at dated output folder plus Excel report.",
+      "sections": [
+        "Run summary cards: found, processed, qualified, not qualified, undetermined",
+        "Output location block: Jalali-dated folder path, copy-path button, report filename",
+        "Criteria-used recap plus screening Jalali/Gregorian date",
+        "Per-resume results table: filename, candidate name, estimated years, experience status, technologies detected, required found, required missing, final status, reason",
+        "Table filter and search: status filter chips (All/Qualified/Not Qualified/Undetermined) plus text search",
+        "Empty-qualified notice when zero qualified: no copies made, report still generated",
+        "Start new screening button"
+      ],
+      "contentPriority": [
+        "Summary counts and output folder path",
+        "Per-resume table with reason column",
+        "Criteria recap and screening date",
+        "Filter controls and new-run action"
+      ],
+      "states": [
+        "populated",
+        "empty",
+        "error"
+      ],
+      "interactions": [
+        "Copy-path button copies output folder path with confirmation",
+        "Status filter and search narrow table rows without refetch",
+        "Row shows full reason text; long skills lists truncate with expand",
+        "Start new screening returns to setup preserving last folder and criteria",
+        "Failed run shows error state with retry, never links missing output"
+      ],
+      "responsive": "Summary cards wrap to single column; table scrolls horizontally with sticky first column and status column; filters wrap.",
+      "accessibility": [
+        "Summary counts as list with text labels, not color-only",
+        "Table uses th scope, caption, and status text plus icon with aria-label",
+        "Filter chips use aria-pressed; search input labelled; results count announced in live region",
+        "Copy-path confirms via live region text"
+      ]
+    }
+  ],
+  "flows": [
+    {
+      "name": "Bulk screening run",
+      "steps": [
+        "screening-setup",
+        "screening-progress",
+        "screening-results"
+      ]
+    }
+  ],
+  "openQuestions": [
+    "Does results screen need full per-resume table in UI or summary counts plus Excel download suffice for v1?",
+    "Should Cancel take user to partial results screen or stay on progress with stopped state?",
+    "Preferred display for screening date: Jalali only or Jalali plus Gregorian side by side?"
+  ],
+  "status": "approved",
+  "approved": true,
+  "updatedAt": "2026-10-02T17:58:08.000Z"
+}

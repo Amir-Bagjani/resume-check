@@ -1,9 +1,16 @@
-"""Output folder (Jalali-dated) plus qualified file copies."""
+"""Output folder (Jalali-dated) plus copies of every processed resume.
+
+Every processed resume is copied, whatever its screening status. The viewer must be
+able to open rejected and undetermined ones too, and it cannot rely on the staged
+upload: that directory is temporary and is swept once the session is over.
+"""
 from __future__ import annotations
 
 import shutil
 from datetime import date
 from pathlib import Path
+
+REPORT_FILENAME = "screening-report.xlsx"
 
 
 def jalali_today_str(today: date | None = None) -> str:
@@ -29,14 +36,43 @@ def make_output_dir(source_folder: str, today: date | None = None) -> Path:
     return candidate
 
 
-def copy_qualified(source_folder: str, output_dir: Path, filenames: list[str]) -> list[str]:
-    """Copy only qualified files byte-identical. Skip-and-record on OS error."""
-    copied = []
+def _unique_name(desired: str, taken: set[str]) -> str:
+    """Return a name free within the output folder, keeping the extension intact.
+
+    Two resumes can share a file name (``cv.pdf`` in two sub-folders). They must not
+    overwrite each other, so a counter is appended to the stem. Persian names,
+    spaces and other characters are preserved as-is.
+    """
+    if desired not in taken:
+        return desired
+    path = Path(desired)
+    stem, suffix = path.stem, path.suffix
+    i = 2
+    while f"{stem}-{i}{suffix}" in taken:
+        i += 1
+    return f"{stem}-{i}{suffix}"
+
+
+def copy_resumes(source_folder: str, output_dir: Path, filenames: list[str]) -> list[tuple[str, str]]:
+    """Copy every listed resume into the output folder, byte-identical.
+
+    Returns (original, written) pairs; the written name may differ on collision.
+    Subdirectory paths are flattened with their folder prefix (``a/cv.docx`` ->
+    ``a-cv.docx``) so the output folder stays flat and no file is dropped for a
+    missing parent dir. An unreadable source is skipped rather than aborting the
+    run, but never silently: the caller compares written vs processed counts.
+    """
+    source = Path(source_folder)
+    written: list[tuple[str, str]] = []
+    taken: set[str] = set()
     for name in filenames:
-        src = Path(source_folder) / name
+        src = source / name
+        safe_flat = name.replace("/", "-")
+        target_name = _unique_name(safe_flat, taken)
         try:
-            shutil.copy2(src, output_dir / name)
-            copied.append(name)
+            shutil.copy2(src, output_dir / target_name)
         except OSError:
             continue
-    return copied
+        taken.add(target_name)
+        written.append((name, target_name))
+    return written

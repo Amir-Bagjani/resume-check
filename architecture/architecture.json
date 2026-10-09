@@ -1,1 +1,597 @@
-{"apis": [{"errors": ["400 invalid path", "404 folder not found", "422 no supported files"], "id": "scan-folder", "method": "POST", "path": "/api/folders/scan", "purpose": "Validate local folder path and count top-level PDF/DOCX files", "request": {"folderPath": "string absolute or relative local path"}, "response": {"fileCount": "number", "files": "string[] filenames"}}, {"errors": ["400 no criteria", "404 folder not found", "422 no supported files"], "id": "start-run", "method": "POST", "path": "/api/runs", "purpose": "Start screening run with folder path plus active criteria, returns run id", "request": {"criteria": {"minYears": "number|null", "keywords": "string[]"}, "folderPath": "string"}, "response": {"runId": "string"}}, {"id": "get-run", "method": "GET", "path": "/api/runs/{runId}", "purpose": "Poll run progress and final summary plus per-resume rows", "response": {"counts": "found/processed/qualified/notQualified/undetermined", "outputPath": "string|null", "results": "ResumeResult[]"}}, {"id": "pause-run", "method": "POST", "path": "/api/runs/{runId}/pause", "purpose": "Freeze chunked queue between chunks of 10"}, {"id": "resume-run", "method": "POST", "path": "/api/runs/{runId}/resume", "purpose": "Resume paused run"}, {"errors": ["404 run not found", "409 run already finished"], "id": "cancel-run", "method": "POST", "path": "/api/runs/{runId}/cancel", "purpose": "Stop remaining files, finalize partial output plus report for processed files"}], "components": [{"dependsOn": [], "id": "web-ui", "layer": "interface", "name": "Web UI static pages", "paths": ["frontend/index.html", "frontend/app.js", "frontend/styles.css"], "responsibility": "Folder input plus criteria chips, chunked progress with pause/cancel, results summary plus per-resume table. Plain static JS served by backend, no build step."}, {"dependsOn": ["run-orchestrator"], "id": "screening-api", "layer": "application", "name": "Screening REST API", "paths": ["backend/app/main.py", "backend/app/routes_runs.py"], "responsibility": "Folder scan, run lifecycle (start/status/pause/resume/cancel), input validation, serves frontend static files."}, {"dependsOn": [], "id": "run-orchestrator", "layer": "application", "name": "Chunked run orchestrator", "paths": ["backend/app/runner.py"], "responsibility": "In-memory run registry, processes files in chunks of 10, supports pause/cancel, aggregates counts, triggers output writer at end or on cancel."}, {"dependsOn": [], "id": "resume-parser", "layer": "domain", "name": "Resume text extractor and analyzer", "paths": ["backend/app/extraction.py"], "responsibility": "Extract text from text-based PDF/DOCX, estimate total years experience via date-range regex, detect skills, fuzzy case-insensitive keyword match ignoring case/spacing/punctuation plus alias map."}, {"dependsOn": ["resume-parser"], "id": "qualification-engine", "layer": "domain", "name": "Qualification engine", "paths": ["backend/app/qualification.py"], "responsibility": "Pluggable criterion evaluators with AND logic. Emits Qualified/Not Qualified/Undetermined plus per-criterion status and human-readable reason. Unknown experience maps to Undetermined, never silent reject."}, {"dependsOn": ["qualification-engine"], "id": "output-writer", "layer": "infrastructure", "name": "Output folder plus Excel report writer", "paths": ["backend/app/output_writer.py", "backend/app/report.py"], "responsibility": "Create resume-screening-output-<Jalali YYYY-MM-DD> with -1/-2 collision suffix inside source folder, copy only Qualified files byte-identical, write single-sheet xlsx with summary block plus per-resume rows."}], "dataFlow": [{"description": "User enters path and criteria, polls run status", "from": "web-ui", "to": "screening-api", "via": "REST JSON polling (2s interval)"}, {"description": "API delegates chunk execution and state", "from": "screening-api", "to": "run-orchestrator", "via": "in-process call"}, {"description": "Orchestrator extracts text per file", "from": "run-orchestrator", "to": "resume-parser", "via": "in-process call per file"}, {"description": "Parsed facts evaluated against active criteria", "from": "resume-parser", "to": "qualification-engine", "via": "ResumeFacts struct"}, {"description": "Final or partial results written to disk", "from": "run-orchestrator", "to": "output-writer", "via": "ResumeResult list at finish or cancel"}], "dataModel": [{"entity": "ScreeningCriteria", "fields": [{"name": "minYears", "note": "null means criterion inactive", "required": false, "type": "number|null"}, {"name": "keywords", "note": "deduped, blank entries rejected client and server side", "required": false, "type": "string[]"}]}, {"entity": "ResumeResult", "fields": [{"name": "filename", "required": true, "type": "string"}, {"name": "candidateName", "note": "best-effort first non-empty heading line, else empty", "required": false, "type": "string"}, {"name": "estimatedYears", "note": "null when unknown", "required": false, "type": "number|null"}, {"name": "experienceStatus", "required": true, "type": "pass|fail|unknown"}, {"name": "skillsDetected", "required": true, "type": "string[]"}, {"name": "requiredFound", "required": true, "type": "string[]"}, {"name": "requiredMissing", "required": true, "type": "string[]"}, {"name": "finalStatus", "required": true, "type": "Qualified|Not Qualified|Undetermined"}, {"name": "reason", "required": true, "type": "string"}]}, {"entity": "ScreeningRun", "fields": [{"name": "runId", "required": true, "type": "string"}, {"name": "folderPath", "required": true, "type": "string"}, {"name": "criteria", "required": true, "type": "ScreeningCriteria"}, {"name": "state", "required": true, "type": "running|paused|cancelled|finished"}, {"name": "found", "required": true, "type": "number"}, {"name": "processed", "required": true, "type": "number"}, {"name": "qualified", "required": true, "type": "number"}, {"name": "notQualified", "required": true, "type": "number"}, {"name": "undetermined", "required": true, "type": "number"}, {"name": "outputPath", "required": false, "type": "string|null"}, {"name": "results", "required": true, "type": "ResumeResult[]"}]}], "decisions": [{"alternatives": ["Node.js + pdf-parse + mammoth + exceljs", "Electron desktop app"], "decision": "Python 3.11 + FastAPI backend serving plain HTML/JS, no frontend framework, no database", "id": "D-stack", "rationale": "Python has mature offline PDF/DOCX/Excel/Jalali libs, zero build step, single pip install runs on Windows and Linux, satisfies offline constraint with least code."}, {"alternatives": ["WebSocket streaming", "Server-sent events"], "decision": "REST polling every 2s for progress", "id": "D-polling", "rationale": "Chunks of 10 finish fast enough that polling is sufficient; avoids websocket state and reconnect logic."}, {"alternatives": ["ML/NLP model or LLM for experience parsing", "per-file SQLite persistence"], "decision": "Regex date-range heuristic for experience plus normalized fuzzy keyword match with small alias map, in-memory run state", "id": "D-heuristic", "rationale": "Offline, deterministic, explainable, no model download; in-memory state is enough for single-user local runs. ponytail: skip DB, skip ML."}, {"alternatives": ["Multi-sheet workbook", "CSV report"], "decision": "Single-sheet xlsx via openpyxl with summary rows on top then header plus per-resume rows", "id": "D-excel", "rationale": "PRD mandates single .xlsx sheet layout; openpyxl is pure-python offline."}, {"alternatives": ["Gregorian date folder name", "timestamp with time"], "decision": "jdatetime Jalali YYYY-MM-DD folder name with -1/-2 collision suffix", "id": "D-jalali", "rationale": "PRD requires Persian/Jalali date in folder name; pure-python jdatetime works offline on both OSes."}], "deployment": {"environments": ["local Windows", "local Linux", "local macOS"], "strategy": "Single local process: pip install then uvicorn serve, backend reads server-local filesystem, no containers or cloud.", "targets": ["local-machine"]}, "generatedBy": {"agentId": "architect"}, "openQuestions": ["Results screen: full per-resume table in UI or summary counts only (wireframe leaves both options; architecture supports both since GET run returns full rows).", "Screening date display: Jalali only or Jalali plus Gregorian side by side (report stores both, UI can show either)."], "project": "resume-check", "projectId": "07ba90df-480f-4a2f-bad6-ab8785a69ac6", "risks": [{"description": "Scanned-image or password-protected PDFs yield no text; counted as Undetermined per AC-008 but high volume degrades perceived accuracy.", "id": "R-scanned", "mitigation": "Detect empty-text extraction early, mark Undetermined with could-not-analyze reason without halting run; document no-OCR limit in UI.", "severity": "medium"}, {"description": "Experience heuristic mis-estimates on unusual date formats or Persian dates.", "id": "R-experience", "mitigation": "Conservative estimator returns Unknown instead of guessing; reason text states could not be determined; unit tests cover common resume date patterns.", "severity": "medium"}, {"description": "Large folders exhaust memory if all texts held at once.", "id": "R-memory", "mitigation": "Process strictly in chunks of 10, stream file reads, keep only ResumeResult structs in memory.", "severity": "low"}, {"description": "Filename collisions or unicode names fail on copy to output folder.", "id": "R-copy", "mitigation": "Copy with shutil.copy2 preserving bytes, skip-and-record on OS error rather than aborting run.", "severity": "low"}], "tasks": [{"acceptanceCriteriaIds": ["AC-017"], "definitionOfDone": "pip install -r requirements succeeds offline from vendored wheels or cache, uvicorn serves GET /api/health and static index at /", "dependsOn": [], "featureIds": ["F-offline-portable"], "id": "T-BE-01", "objective": "Scaffold FastAPI backend serving static frontend plus health endpoint", "owner": "backend-developer", "scope": "Create backend package layout, requirements (fastapi, uvicorn, pypdf, python-docx, openpyxl, jdatetime), main.py with static mount and health route.", "verification": "pip install -r backend/requirements.txt then uvicorn backend.app.main:app; curl /api/health returns 200", "writePaths": ["source/backend/requirements.txt", "source/backend/app/main.py"]}, {"acceptanceCriteriaIds": ["AC-001", "AC-016", "AC-014"], "definitionOfDone": "POST scan on fixture folder returns only top-level pdf/docx count; zero-file folder returns 422 with no output side effect; run state machine supports start/status/pause/resume/cancel with chunk size 10", "dependsOn": ["T-BE-01"], "featureIds": ["F-folder-input", "F-progress-summary"], "id": "T-BE-02", "objective": "Folder scan plus chunked run lifecycle API", "owner": "backend-developer", "scope": "routes_runs.py endpoints plus runner.py in-memory registry with chunk queue, pause/resume/cancel flags, progress counters. No parsing logic here.", "verification": "pytest backend tests for scan filtering, empty-folder 422, pause/resume/cancel transitions", "writePaths": ["source/backend/app/routes_runs.py", "source/backend/app/runner.py"]}, {"acceptanceCriteriaIds": ["AC-006", "AC-007", "AC-008"], "definitionOfDone": "Extractor returns text for text-based PDF and DOCX fixtures, empty string for scanned/protected without raising; normalizer handles case/spacing/punctuation variants and React.js alias", "dependsOn": ["T-BE-01"], "featureIds": ["F-resume-analysis"], "id": "T-BE-03", "objective": "PDF/DOCX text extraction plus experience estimator and keyword matcher", "owner": "backend-developer", "scope": "extraction.py only: pypdf text extract, python-docx paragraphs, date-range regex estimator returning float or None, fuzzy keyword match, candidate-name guess. No API or Excel code.", "verification": "pytest with sample pdf/docx fixtures including react variants and corrupt file", "writePaths": ["source/backend/app/extraction.py"]}, {"acceptanceCriteriaIds": ["AC-003", "AC-004", "AC-005"], "definitionOfDone": "Evaluator implements AND over active criteria; 7yr passes 5yr bar, 3yr fails, unknown maps to Undetermined with explanatory reason; every result carries reason string", "dependsOn": ["T-BE-01"], "featureIds": ["F-qualification"], "id": "T-BE-04", "objective": "Three-way qualification engine with pluggable criteria", "owner": "backend-developer", "scope": "qualification.py only: Criterion protocol plus minYears and keywords evaluators, combine function emitting final status and reason. Imports fact types from extraction via local dataclass to avoid file overlap.", "verification": "pytest matrix: pass/fail/unknown experience crossed with found/missing keywords", "writePaths": ["source/backend/app/qualification.py"]}, {"acceptanceCriteriaIds": ["AC-009", "AC-010", "AC-011", "AC-012", "AC-013"], "definitionOfDone": "Run on fixture folder creates Jalali-dated folder with -1/-2 suffix on collision, copies only Qualified files byte-identical, writes single-sheet xlsx with summary block plus all per-resume rows", "dependsOn": ["T-BE-02", "T-BE-04"], "featureIds": ["F-output-folder", "F-excel-report"], "id": "T-BE-05", "objective": "Jalali output folder plus qualified copy plus Excel report", "owner": "backend-developer", "scope": "output_writer.py (folder naming via jdatetime, collision suffix, shutil.copy2) and report.py (openpyxl single sheet). Called by runner at finish/cancel.", "verification": "pytest end-to-end on temp dir: check folder name regex, collision suffix, originals untouched, xlsx summary and row counts", "writePaths": ["source/backend/app/output_writer.py", "source/backend/app/report.py"]}, {"acceptanceCriteriaIds": ["AC-001", "AC-002", "AC-016"], "definitionOfDone": "Setup screen renders folder input with scan count, min-years number input, keyword chip input with add/remove and duplicate rejection, start blocked until valid folder plus one criterion with hint text", "dependsOn": [], "featureIds": ["F-folder-input", "F-criteria-config"], "id": "T-FE-01", "objective": "Setup screen markup plus styles", "owner": "frontend-developer", "scope": "index.html structure for all three screens and styles.css responsive plus accessible states. No JS behavior here.", "verification": "Open index.html via served backend, check layout under 720px, axe or manual label/role checks", "writePaths": ["source/frontend/index.html", "source/frontend/styles.css"]}, {"acceptanceCriteriaIds": ["AC-014"], "definitionOfDone": "Progress screen polls GET run every 2s, updates bar and counters, pause/resume and cancel with confirm work against API, unreadable files never halt UI", "dependsOn": ["T-FE-01"], "featureIds": ["F-progress-summary"], "id": "T-FE-02", "objective": "Setup and progress UI behavior", "owner": "frontend-developer", "scope": "app_setup.js and app_progress.js: folder scan calls, criteria state, start gating, polling loop, pause/resume/cancel handlers. Exposes window.App hooks consumed by results module.", "verification": "Manual run against stub API plus JS unit check of chunk progress math", "writePaths": ["source/frontend/js/app_setup.js", "source/frontend/js/app_progress.js"]}, {"acceptanceCriteriaIds": ["AC-015"], "definitionOfDone": "Results screen shows summary cards, output path with copy button, criteria recap, filterable per-resume table with reason column, new-run resets without refetch", "dependsOn": ["T-FE-01"], "featureIds": ["F-progress-summary", "F-excel-report"], "id": "T-FE-03", "objective": "Results summary plus per-resume table behavior", "owner": "frontend-developer", "scope": "app_results.js only: render summary counts, output path, status filter chips plus search, table expand for long skills. No changes to setup/progress files.", "verification": "Manual run with stubbed GET run payload covering Qualified/Not Qualified/Undetermined rows and filter/search", "writePaths": ["source/frontend/js/app_results.js"]}], "techStack": {"containerization": "none", "database": "none (filesystem only)", "framework": "FastAPI", "language": "Python", "packageManager": "pip", "rationale": "Single local process satisfies offline Windows/Linux runs, mature PDF/DOCX/Excel/Jalali libraries, plain static frontend avoids build toolchain. No DB or auth needed for single-user local v1.", "runtime": "Python 3.11"}, "type": "ARCHITECTURE"}
+{
+  "apis": [
+    {
+      "errors": [
+        "400 invalid path",
+        "404 folder not found",
+        "422 no supported files"
+      ],
+      "id": "scan-folder",
+      "method": "POST",
+      "path": "/api/folders/scan",
+      "purpose": "Validate local folder path and count top-level PDF/DOCX files",
+      "request": {
+        "folderPath": "string absolute or relative local path"
+      },
+      "response": {
+        "fileCount": "number",
+        "files": "string[] filenames"
+      }
+    },
+    {
+      "errors": [
+        "400 no criteria",
+        "404 folder not found",
+        "422 no supported files"
+      ],
+      "id": "start-run",
+      "method": "POST",
+      "path": "/api/runs",
+      "purpose": "Start screening run with folder path plus active criteria, returns run id",
+      "request": {
+        "criteria": {
+          "minYears": "number|null",
+          "keywords": "string[]"
+        },
+        "folderPath": "string"
+      },
+      "response": {
+        "runId": "string"
+      }
+    },
+    {
+      "id": "get-run",
+      "method": "GET",
+      "path": "/api/runs/{runId}",
+      "purpose": "Poll run progress and final summary plus per-resume rows",
+      "response": {
+        "counts": "found/processed/qualified/notQualified/undetermined",
+        "outputPath": "string|null",
+        "results": "ResumeResult[]"
+      }
+    },
+    {
+      "id": "pause-run",
+      "method": "POST",
+      "path": "/api/runs/{runId}/pause",
+      "purpose": "Freeze chunked queue between chunks of 10"
+    },
+    {
+      "id": "resume-run",
+      "method": "POST",
+      "path": "/api/runs/{runId}/resume",
+      "purpose": "Resume paused run"
+    },
+    {
+      "errors": [
+        "404 run not found",
+        "409 run already finished"
+      ],
+      "id": "cancel-run",
+      "method": "POST",
+      "path": "/api/runs/{runId}/cancel",
+      "purpose": "Stop remaining files, finalize partial output plus report for processed files"
+    }
+  ],
+  "components": [
+    {
+      "dependsOn": [],
+      "id": "web-ui",
+      "layer": "interface",
+      "name": "Web UI static pages",
+      "paths": [
+        "frontend/index.html",
+        "frontend/app.js",
+        "frontend/styles.css"
+      ],
+      "responsibility": "Folder input plus criteria chips, chunked progress with pause/cancel, results summary plus per-resume table. Plain static JS served by backend, no build step."
+    },
+    {
+      "dependsOn": [
+        "run-orchestrator"
+      ],
+      "id": "screening-api",
+      "layer": "application",
+      "name": "Screening REST API",
+      "paths": [
+        "backend/app/main.py",
+        "backend/app/routes_runs.py"
+      ],
+      "responsibility": "Folder scan, run lifecycle (start/status/pause/resume/cancel), input validation, serves frontend static files."
+    },
+    {
+      "dependsOn": [],
+      "id": "run-orchestrator",
+      "layer": "application",
+      "name": "Chunked run orchestrator",
+      "paths": [
+        "backend/app/runner.py"
+      ],
+      "responsibility": "In-memory run registry, processes files in chunks of 10, supports pause/cancel, aggregates counts, triggers output writer at end or on cancel."
+    },
+    {
+      "dependsOn": [],
+      "id": "resume-parser",
+      "layer": "domain",
+      "name": "Resume text extractor and analyzer",
+      "paths": [
+        "backend/app/extraction.py"
+      ],
+      "responsibility": "Extract text from text-based PDF/DOCX, estimate total years experience via date-range regex, detect skills, fuzzy case-insensitive keyword match ignoring case/spacing/punctuation plus alias map."
+    },
+    {
+      "dependsOn": [
+        "resume-parser"
+      ],
+      "id": "qualification-engine",
+      "layer": "domain",
+      "name": "Qualification engine",
+      "paths": [
+        "backend/app/qualification.py"
+      ],
+      "responsibility": "Pluggable criterion evaluators with AND logic. Emits Qualified/Not Qualified/Undetermined plus per-criterion status and human-readable reason. Unknown experience maps to Undetermined, never silent reject."
+    },
+    {
+      "dependsOn": [
+        "qualification-engine"
+      ],
+      "id": "output-writer",
+      "layer": "infrastructure",
+      "name": "Output folder plus Excel report writer",
+      "paths": [
+        "backend/app/output_writer.py",
+        "backend/app/report.py"
+      ],
+      "responsibility": "Create resume-screening-output-<Jalali YYYY-MM-DD> with -1/-2 collision suffix inside source folder, copy only Qualified files byte-identical, write single-sheet xlsx with summary block plus per-resume rows."
+    }
+  ],
+  "dataFlow": [
+    {
+      "description": "User enters path and criteria, polls run status",
+      "from": "web-ui",
+      "to": "screening-api",
+      "via": "REST JSON polling (2s interval)"
+    },
+    {
+      "description": "API delegates chunk execution and state",
+      "from": "screening-api",
+      "to": "run-orchestrator",
+      "via": "in-process call"
+    },
+    {
+      "description": "Orchestrator extracts text per file",
+      "from": "run-orchestrator",
+      "to": "resume-parser",
+      "via": "in-process call per file"
+    },
+    {
+      "description": "Parsed facts evaluated against active criteria",
+      "from": "resume-parser",
+      "to": "qualification-engine",
+      "via": "ResumeFacts struct"
+    },
+    {
+      "description": "Final or partial results written to disk",
+      "from": "run-orchestrator",
+      "to": "output-writer",
+      "via": "ResumeResult list at finish or cancel"
+    }
+  ],
+  "dataModel": [
+    {
+      "entity": "ScreeningCriteria",
+      "fields": [
+        {
+          "name": "minYears",
+          "note": "null means criterion inactive",
+          "required": false,
+          "type": "number|null"
+        },
+        {
+          "name": "keywords",
+          "note": "deduped, blank entries rejected client and server side",
+          "required": false,
+          "type": "string[]"
+        }
+      ]
+    },
+    {
+      "entity": "ResumeResult",
+      "fields": [
+        {
+          "name": "filename",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "candidateName",
+          "note": "best-effort first non-empty heading line, else empty",
+          "required": false,
+          "type": "string"
+        },
+        {
+          "name": "estimatedYears",
+          "note": "null when unknown",
+          "required": false,
+          "type": "number|null"
+        },
+        {
+          "name": "experienceStatus",
+          "required": true,
+          "type": "pass|fail|unknown"
+        },
+        {
+          "name": "skillsDetected",
+          "required": true,
+          "type": "string[]"
+        },
+        {
+          "name": "requiredFound",
+          "required": true,
+          "type": "string[]"
+        },
+        {
+          "name": "requiredMissing",
+          "required": true,
+          "type": "string[]"
+        },
+        {
+          "name": "finalStatus",
+          "required": true,
+          "type": "Qualified|Not Qualified|Undetermined"
+        },
+        {
+          "name": "reason",
+          "required": true,
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "entity": "ScreeningRun",
+      "fields": [
+        {
+          "name": "runId",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "folderPath",
+          "required": true,
+          "type": "string"
+        },
+        {
+          "name": "criteria",
+          "required": true,
+          "type": "ScreeningCriteria"
+        },
+        {
+          "name": "state",
+          "required": true,
+          "type": "running|paused|cancelled|finished"
+        },
+        {
+          "name": "found",
+          "required": true,
+          "type": "number"
+        },
+        {
+          "name": "processed",
+          "required": true,
+          "type": "number"
+        },
+        {
+          "name": "qualified",
+          "required": true,
+          "type": "number"
+        },
+        {
+          "name": "notQualified",
+          "required": true,
+          "type": "number"
+        },
+        {
+          "name": "undetermined",
+          "required": true,
+          "type": "number"
+        },
+        {
+          "name": "outputPath",
+          "required": false,
+          "type": "string|null"
+        },
+        {
+          "name": "results",
+          "required": true,
+          "type": "ResumeResult[]"
+        }
+      ]
+    }
+  ],
+  "decisions": [
+    {
+      "alternatives": [
+        "Node.js + pdf-parse + mammoth + exceljs",
+        "Electron desktop app"
+      ],
+      "decision": "Python 3.11 + FastAPI backend serving plain HTML/JS, no frontend framework, no database",
+      "id": "D-stack",
+      "rationale": "Python has mature offline PDF/DOCX/Excel/Jalali libs, zero build step, single pip install runs on Windows and Linux, satisfies offline constraint with least code."
+    },
+    {
+      "alternatives": [
+        "WebSocket streaming",
+        "Server-sent events"
+      ],
+      "decision": "REST polling every 2s for progress",
+      "id": "D-polling",
+      "rationale": "Chunks of 10 finish fast enough that polling is sufficient; avoids websocket state and reconnect logic."
+    },
+    {
+      "alternatives": [
+        "ML/NLP model or LLM for experience parsing",
+        "per-file SQLite persistence"
+      ],
+      "decision": "Regex date-range heuristic for experience plus normalized fuzzy keyword match with small alias map, in-memory run state",
+      "id": "D-heuristic",
+      "rationale": "Offline, deterministic, explainable, no model download; in-memory state is enough for single-user local runs. ponytail: skip DB, skip ML."
+    },
+    {
+      "alternatives": [
+        "Multi-sheet workbook",
+        "CSV report"
+      ],
+      "decision": "Single-sheet xlsx via openpyxl with summary rows on top then header plus per-resume rows",
+      "id": "D-excel",
+      "rationale": "PRD mandates single .xlsx sheet layout; openpyxl is pure-python offline."
+    },
+    {
+      "alternatives": [
+        "Gregorian date folder name",
+        "timestamp with time"
+      ],
+      "decision": "jdatetime Jalali YYYY-MM-DD folder name with -1/-2 collision suffix",
+      "id": "D-jalali",
+      "rationale": "PRD requires Persian/Jalali date in folder name; pure-python jdatetime works offline on both OSes."
+    }
+  ],
+  "deployment": {
+    "environments": [
+      "local Windows",
+      "local Linux",
+      "local macOS"
+    ],
+    "strategy": "Single local process: pip install then uvicorn serve, backend reads server-local filesystem, no containers or cloud.",
+    "targets": [
+      "local-machine"
+    ]
+  },
+  "generatedBy": {
+    "agentId": "architect"
+  },
+  "openQuestions": [
+    "Results screen: full per-resume table in UI or summary counts only (wireframe leaves both options; architecture supports both since GET run returns full rows).",
+    "Screening date display: Jalali only or Jalali plus Gregorian side by side (report stores both, UI can show either)."
+  ],
+  "project": "resume-check",
+  "projectId": "07ba90df-480f-4a2f-bad6-ab8785a69ac6",
+  "risks": [
+    {
+      "description": "Scanned-image or password-protected PDFs yield no text; counted as Undetermined per AC-008 but high volume degrades perceived accuracy.",
+      "id": "R-scanned",
+      "mitigation": "Detect empty-text extraction early, mark Undetermined with could-not-analyze reason without halting run; document no-OCR limit in UI.",
+      "severity": "medium"
+    },
+    {
+      "description": "Experience heuristic mis-estimates on unusual date formats or Persian dates.",
+      "id": "R-experience",
+      "mitigation": "Conservative estimator returns Unknown instead of guessing; reason text states could not be determined; unit tests cover common resume date patterns.",
+      "severity": "medium"
+    },
+    {
+      "description": "Large folders exhaust memory if all texts held at once.",
+      "id": "R-memory",
+      "mitigation": "Process strictly in chunks of 10, stream file reads, keep only ResumeResult structs in memory.",
+      "severity": "low"
+    },
+    {
+      "description": "Filename collisions or unicode names fail on copy to output folder.",
+      "id": "R-copy",
+      "mitigation": "Copy with shutil.copy2 preserving bytes, skip-and-record on OS error rather than aborting run.",
+      "severity": "low"
+    }
+  ],
+  "tasks": [
+    {
+      "acceptanceCriteriaIds": [
+        "AC-017"
+      ],
+      "definitionOfDone": "pip install -r requirements succeeds offline from vendored wheels or cache, uvicorn serves GET /api/health and static index at /",
+      "dependsOn": [],
+      "featureIds": [
+        "F-offline-portable"
+      ],
+      "id": "T-BE-01",
+      "objective": "Scaffold FastAPI backend serving static frontend plus health endpoint",
+      "owner": "backend-developer",
+      "scope": "Create backend package layout, requirements (fastapi, uvicorn, pypdf, python-docx, openpyxl, jdatetime), main.py with static mount and health route.",
+      "verification": "pip install -r backend/requirements.txt then uvicorn backend.app.main:app; curl /api/health returns 200",
+      "writePaths": [
+        "source/backend/requirements.txt",
+        "source/backend/app/main.py"
+      ]
+    },
+    {
+      "acceptanceCriteriaIds": [
+        "AC-001",
+        "AC-016",
+        "AC-014"
+      ],
+      "definitionOfDone": "POST scan on fixture folder returns only top-level pdf/docx count; zero-file folder returns 422 with no output side effect; run state machine supports start/status/pause/resume/cancel with chunk size 10",
+      "dependsOn": [
+        "T-BE-01"
+      ],
+      "featureIds": [
+        "F-folder-input",
+        "F-progress-summary"
+      ],
+      "id": "T-BE-02",
+      "objective": "Folder scan plus chunked run lifecycle API",
+      "owner": "backend-developer",
+      "scope": "routes_runs.py endpoints plus runner.py in-memory registry with chunk queue, pause/resume/cancel flags, progress counters. No parsing logic here.",
+      "verification": "pytest backend tests for scan filtering, empty-folder 422, pause/resume/cancel transitions",
+      "writePaths": [
+        "source/backend/app/routes_runs.py",
+        "source/backend/app/runner.py"
+      ]
+    },
+    {
+      "acceptanceCriteriaIds": [
+        "AC-006",
+        "AC-007",
+        "AC-008"
+      ],
+      "definitionOfDone": "Extractor returns text for text-based PDF and DOCX fixtures, empty string for scanned/protected without raising; normalizer handles case/spacing/punctuation variants and React.js alias",
+      "dependsOn": [
+        "T-BE-01"
+      ],
+      "featureIds": [
+        "F-resume-analysis"
+      ],
+      "id": "T-BE-03",
+      "objective": "PDF/DOCX text extraction plus experience estimator and keyword matcher",
+      "owner": "backend-developer",
+      "scope": "extraction.py only: pypdf text extract, python-docx paragraphs, date-range regex estimator returning float or None, fuzzy keyword match, candidate-name guess. No API or Excel code.",
+      "verification": "pytest with sample pdf/docx fixtures including react variants and corrupt file",
+      "writePaths": [
+        "source/backend/app/extraction.py"
+      ]
+    },
+    {
+      "acceptanceCriteriaIds": [
+        "AC-003",
+        "AC-004",
+        "AC-005"
+      ],
+      "definitionOfDone": "Evaluator implements AND over active criteria; 7yr passes 5yr bar, 3yr fails, unknown maps to Undetermined with explanatory reason; every result carries reason string",
+      "dependsOn": [
+        "T-BE-01"
+      ],
+      "featureIds": [
+        "F-qualification"
+      ],
+      "id": "T-BE-04",
+      "objective": "Three-way qualification engine with pluggable criteria",
+      "owner": "backend-developer",
+      "scope": "qualification.py only: Criterion protocol plus minYears and keywords evaluators, combine function emitting final status and reason. Imports fact types from extraction via local dataclass to avoid file overlap.",
+      "verification": "pytest matrix: pass/fail/unknown experience crossed with found/missing keywords",
+      "writePaths": [
+        "source/backend/app/qualification.py"
+      ]
+    },
+    {
+      "acceptanceCriteriaIds": [
+        "AC-009",
+        "AC-010",
+        "AC-011",
+        "AC-012",
+        "AC-013"
+      ],
+      "definitionOfDone": "Run on fixture folder creates Jalali-dated folder with -1/-2 suffix on collision, copies only Qualified files byte-identical, writes single-sheet xlsx with summary block plus all per-resume rows",
+      "dependsOn": [
+        "T-BE-02",
+        "T-BE-04"
+      ],
+      "featureIds": [
+        "F-output-folder",
+        "F-excel-report"
+      ],
+      "id": "T-BE-05",
+      "objective": "Jalali output folder plus qualified copy plus Excel report",
+      "owner": "backend-developer",
+      "scope": "output_writer.py (folder naming via jdatetime, collision suffix, shutil.copy2) and report.py (openpyxl single sheet). Called by runner at finish/cancel.",
+      "verification": "pytest end-to-end on temp dir: check folder name regex, collision suffix, originals untouched, xlsx summary and row counts",
+      "writePaths": [
+        "source/backend/app/output_writer.py",
+        "source/backend/app/report.py"
+      ]
+    },
+    {
+      "acceptanceCriteriaIds": [
+        "AC-001",
+        "AC-002",
+        "AC-016"
+      ],
+      "definitionOfDone": "Setup screen renders folder input with scan count, min-years number input, keyword chip input with add/remove and duplicate rejection, start blocked until valid folder plus one criterion with hint text",
+      "dependsOn": [],
+      "featureIds": [
+        "F-folder-input",
+        "F-criteria-config"
+      ],
+      "id": "T-FE-01",
+      "objective": "Setup screen markup plus styles",
+      "owner": "frontend-developer",
+      "scope": "index.html structure for all three screens and styles.css responsive plus accessible states. No JS behavior here.",
+      "verification": "Open index.html via served backend, check layout under 720px, axe or manual label/role checks",
+      "writePaths": [
+        "source/frontend/index.html",
+        "source/frontend/styles.css"
+      ]
+    },
+    {
+      "acceptanceCriteriaIds": [
+        "AC-014"
+      ],
+      "definitionOfDone": "Progress screen polls GET run every 2s, updates bar and counters, pause/resume and cancel with confirm work against API, unreadable files never halt UI",
+      "dependsOn": [
+        "T-FE-01"
+      ],
+      "featureIds": [
+        "F-progress-summary"
+      ],
+      "id": "T-FE-02",
+      "objective": "Setup and progress UI behavior",
+      "owner": "frontend-developer",
+      "scope": "app_setup.js and app_progress.js: folder scan calls, criteria state, start gating, polling loop, pause/resume/cancel handlers. Exposes window.App hooks consumed by results module.",
+      "verification": "Manual run against stub API plus JS unit check of chunk progress math",
+      "writePaths": [
+        "source/frontend/js/app_setup.js",
+        "source/frontend/js/app_progress.js"
+      ]
+    },
+    {
+      "acceptanceCriteriaIds": [
+        "AC-015"
+      ],
+      "definitionOfDone": "Results screen shows summary cards, output path with copy button, criteria recap, filterable per-resume table with reason column, new-run resets without refetch",
+      "dependsOn": [
+        "T-FE-01"
+      ],
+      "featureIds": [
+        "F-progress-summary",
+        "F-excel-report"
+      ],
+      "id": "T-FE-03",
+      "objective": "Results summary plus per-resume table behavior",
+      "owner": "frontend-developer",
+      "scope": "app_results.js only: render summary counts, output path, status filter chips plus search, table expand for long skills. No changes to setup/progress files.",
+      "verification": "Manual run with stubbed GET run payload covering Qualified/Not Qualified/Undetermined rows and filter/search",
+      "writePaths": [
+        "source/frontend/js/app_results.js"
+      ]
+    }
+  ],
+  "techStack": {
+    "containerization": "none",
+    "database": "none (filesystem only)",
+    "framework": "FastAPI",
+    "language": "Python",
+    "packageManager": "pip",
+    "rationale": "Single local process satisfies offline Windows/Linux runs, mature PDF/DOCX/Excel/Jalali libraries, plain static frontend avoids build toolchain. No DB or auth needed for single-user local v1.",
+    "runtime": "Python 3.11"
+  },
+  "type": "ARCHITECTURE",
+  "status": "approved",
+  "approved": true,
+  "updatedAt": "2026-10-02T18:01:39.724Z"
+}

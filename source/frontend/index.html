@@ -1,143 +1,290 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="fa" dir="rtl">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Resume Screening</title>
+<title>غربالگری رزومه</title>
+<link rel="icon" href="data:,">
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-<header class="app-header">
-  <h1>Resume Screening</h1>
-  <p>Bulk-screen a local folder of PDF/DOCX resumes by experience and required keywords. Originals are never modified.</p>
-</header>
 
-<main>
-  <!-- Setup screen -->
-  <section id="screen-setup" aria-labelledby="setup-heading">
-    <h2 id="setup-heading">1. Folder and criteria</h2>
+<div class="shell">
 
-    <div class="card">
-      <h3><label for="folder-path">Resume folder path</label></h3>
-      <p id="folder-help" class="help">Same-machine local path, e.g. <code>/data/resumes</code>. Only top-level <code>.pdf</code> / <code>.docx</code> files are scanned; subfolders and other extensions are ignored. No OCR in v1.</p>
-      <div class="row">
-        <input id="folder-path" type="text" dir="ltr" autocomplete="off" spellcheck="false"
-               aria-describedby="folder-help folder-status" placeholder="/data/resumes">
-        <button id="scan-btn" type="button">Validate / Scan</button>
+  <!-- ===================== Setup ===================== -->
+  <section id="screen-setup" class="screen" aria-labelledby="setup-heading">
+    <header class="hero">
+      <div class="hero-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+          <path d="M14 2v6h6"/><path d="M9 13h6"/><path d="M9 17h4"/>
+        </svg>
       </div>
-      <p id="folder-status" class="status" role="status" aria-live="polite"></p>
-    </div>
-
-    <div class="card">
-      <h3 id="criteria-heading">Screening criteria</h3>
-      <p class="help" id="criteria-help">Each criterion is optional, but at least one is required to start.</p>
-      <div class="row">
-        <label for="min-years">Minimum years of experience (optional)</label>
-        <input id="min-years" type="number" min="0" max="60" step="0.5" inputmode="decimal" aria-describedby="criteria-help">
+      <div>
+        <h1 id="setup-heading">غربالگری رزومه</h1>
+        <p>پوشه رزومه‌ها را انتخاب کنید، معیارها را مشخص کنید و نتیجه را همان‌جا ببینید.</p>
       </div>
-      <div class="row">
-        <label for="keyword-input">Required technologies / keywords</label>
-      </div>
-      <div class="row">
-        <input id="keyword-input" type="text" autocomplete="off" spellcheck="false" placeholder="e.g. React" aria-describedby="criteria-help">
-        <button id="keyword-add-btn" type="button">Add</button>
-      </div>
-      <ul id="keyword-chips" class="chips" aria-label="Required keywords"></ul>
-      <p class="help future-note">Extensible: future criteria (education, location, titles, …) plug in here without workflow redesign.</p>
-    </div>
+    </header>
 
-    <div class="card">
-      <button id="start-btn" type="button" disabled>Start screening</button>
-      <p id="start-hint" class="help">Select a valid folder with resumes and set at least one criterion to start.</p>
-      <div id="setup-error" class="error" role="alert" tabindex="-1" hidden></div>
-    </div>
-  </section>
+    <!-- Step 1: folder -->
+    <article class="card step" aria-labelledby="step-folder">
+      <div class="step-head">
+        <span class="step-num">۱</span>
+        <h2 id="step-folder">انتخاب پوشه رزومه‌ها</h2>
+      </div>
 
-  <!-- Progress screen -->
-  <section id="screen-progress" aria-labelledby="progress-heading" hidden>
-    <h2 id="progress-heading">2. Screening in progress</h2>
-    <div class="card">
-      <p><strong>Folder:</strong> <code id="progress-folder" dir="ltr"></code></p>
-      <p><strong>Criteria:</strong> <span id="progress-criteria"></span></p>
-      <div class="progress-wrap">
-        <div id="progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" aria-label="Screening progress">
-          <div id="progress-fill"></div>
+      <input id="folder-input" type="file" webkitdirectory directory multiple
+             accept=".pdf,.docx"
+             class="sr-only" aria-describedby="folder-help">
+
+      <button id="folder-btn" type="button" class="dropzone" aria-describedby="folder-help">
+        <span class="dz-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+          </svg>
+        </span>
+        <span class="dz-title" id="dz-title">انتخاب پوشه رزومه‌ها</span>
+        <span class="dz-sub">فایل‌های PDF و DOCX داخل پوشه بررسی می‌شوند</span>
+      </button>
+
+      <p id="folder-status" class="inline-status" role="status" aria-live="polite"></p>
+
+      <div id="folder-summary" class="picked" hidden>
+        <div class="picked-main">
+          <span class="picked-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M20 6 9 17l-5-5"/>
+            </svg>
+          </span>
+          <span class="picked-text">
+            <strong id="picked-name" dir="auto">—</strong>
+            <span id="picked-count" class="picked-count"></span>
+          </span>
         </div>
-        <p id="progress-text" class="status" role="status" aria-live="polite">0 / 0 (0%)</p>
+        <button id="folder-reset-btn" type="button" class="btn ghost sm">تغییر پوشه</button>
       </div>
-      <ul id="progress-counters" class="cards" aria-label="Live counters">
-        <li>Processed: <strong id="c-processed">0</strong></li>
-        <li>Qualified: <strong id="c-qualified">0</strong></li>
-        <li>Not qualified: <strong id="c-not">0</strong></li>
-        <li>Undetermined: <strong id="c-und">0</strong></li>
+
+      <p id="folder-help" class="hint">فقط فایل‌های PDF و DOCX خوانده می‌شوند؛ فایل‌های اصلی شما تغییری نمی‌کنند.</p>
+    </article>
+
+    <!-- Step 2: criteria -->
+    <article class="card step" aria-labelledby="step-criteria">
+      <div class="step-head">
+        <span class="step-num">۲</span>
+        <h2 id="step-criteria">معیارهای بررسی</h2>
+      </div>
+
+      <div class="field">
+        <label for="min-years">حداقل سابقه کار اعلام‌شده</label>
+        <div class="input-wrap">
+          <input id="min-years" type="number" min="0" max="60" step="1" inputmode="numeric"
+                 placeholder="۵" aria-describedby="min-years-hint">
+          <span class="unit">سال</span>
+        </div>
+        <p id="min-years-hint" class="hint">فقط عددی که داوطلب در رزومه نوشته مقایسه می‌شود.</p>
+      </div>
+
+      <div class="field">
+        <label for="keyword-input">فناوری‌های موردنیاز</label>
+        <div class="input-wrap">
+          <input id="keyword-input" type="text" autocomplete="off" spellcheck="false"
+                 placeholder="مثلاً React" aria-describedby="keyword-hint">
+          <button id="keyword-add-btn" type="button" class="btn ghost">افزودن</button>
+        </div>
+        <ul id="keyword-chips" class="chips" aria-label="فناوری‌های موردنیاز"></ul>
+        <p id="keyword-hint" class="hint">اختیاری. حداقل یکی از دو معیار لازم است.</p>
+      </div>
+
+      <!-- Output destination -->
+      <div class="field">
+        <label for="output-folder">مسیر ذخیره نتایج</label>
+        <input id="output-folder" type="text" dir="ltr" autocomplete="off" spellcheck="false"
+               placeholder="/Users/you/Desktop/resumes">
+        <p class="hint">پوشه‌ای که گزارش و رزومه‌های تأییدشده در آن ذخیره می‌شوند. اگر خالی بماند، نتایج را از همین صفحه دانلود کنید.</p>
+      </div>
+    </article>
+
+    <!-- Step 3: run -->
+    <div class="run-bar">
+      <p id="start-hint" class="run-hint">برای شروع، پوشه را انتخاب کنید و حداقل یک معیار تعیین کنید.</p>
+      <button id="start-btn" type="button" class="btn primary lg" disabled>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="m5 3 14 9-14 9z"/>
+        </svg>
+        شروع بررسی رزومه‌ها
+      </button>
+    </div>
+    <div id="setup-error" class="alert" role="alert" tabindex="-1" hidden></div>
+  </section>
+
+  <!-- ===================== Progress ===================== -->
+  <section id="screen-progress" class="screen" aria-labelledby="progress-heading" hidden>
+    <div class="card progress-card">
+      <div class="spinner" aria-hidden="true"></div>
+      <h2 id="progress-heading">در حال بررسی رزومه‌ها</h2>
+      <p class="progress-meta"><span id="progress-folder" dir="auto">—</span> · <span id="progress-criteria">—</span></p>
+
+      <div class="progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100"
+           aria-valuenow="0" aria-label="پیشرفت بررسی">
+        <div id="progress-fill"></div>
+      </div>
+      <p id="progress-text" class="progress-text">۰ از ۰</p>
+      <p id="progress-current" class="progress-file" dir="auto"></p>
+
+      <ul id="progress-counters" class="mini-stats">
+        <li><span class="dot neutral"></span>پردازش‌شده <strong id="c-processed">۰</strong></li>
+        <li><span class="dot ok"></span>تأیید <strong id="c-qualified">۰</strong></li>
+        <li><span class="dot bad"></span>رد <strong id="c-not">۰</strong></li>
+        <li><span class="dot warn"></span>نیازمند بررسی <strong id="c-und">۰</strong></li>
       </ul>
-      <p class="help">Processing <span id="progress-current">—</span> · 10 files at a time. Unreadable files are marked Undetermined without stopping the run.</p>
-      <div class="row">
-        <button id="pause-btn" type="button">Pause</button>
-        <button id="cancel-btn" type="button">Cancel</button>
+
+      <div class="progress-actions">
+        <button id="pause-btn" type="button" class="btn ghost">توقف موقت</button>
+        <button id="cancel-btn" type="button" class="btn ghost danger">لغو</button>
       </div>
-      <p class="help">Cancel stops remaining files but keeps partial results and a report for processed files.</p>
-      <p id="progress-error" class="error" role="alert" hidden></p>
+      <p id="progress-error" class="alert" role="alert" hidden></p>
     </div>
   </section>
 
-  <!-- Results screen -->
-  <section id="screen-results" aria-labelledby="results-heading" hidden>
-    <h2 id="results-heading">3. Results</h2>
-    <div class="card">
-      <ul id="summary-cards" class="cards" aria-label="Run summary">
-        <li>Found: <strong id="s-found">0</strong></li>
-        <li>Processed: <strong id="s-processed">0</strong></li>
-        <li>Qualified: <strong id="s-qualified">0</strong></li>
-        <li>Not qualified: <strong id="s-not">0</strong></li>
-        <li>Undetermined: <strong id="s-und">0</strong></li>
-      </ul>
-      <p><strong>Output folder:</strong> <code id="output-path" dir="ltr">—</code>
-        <button id="copy-path-btn" type="button">Copy path</button></p>
-      <p class="help" id="copy-confirm" role="status" aria-live="polite"></p>
-      <p><strong>Report:</strong> <code id="report-name" dir="ltr">—</code></p>
-      <p><strong>Criteria used:</strong> <span id="results-criteria">—</span></p>
-      <p><strong>Screening date:</strong> <span id="results-date">—</span></p>
-      <p id="empty-qualified-notice" class="status" hidden>No resumes qualified — nothing was copied, but the Excel report was still generated.</p>
-      <p id="results-error" class="error" role="alert" hidden></p>
+  <!-- ===================== Results ===================== -->
+  <section id="screen-results" class="screen" aria-labelledby="results-heading" hidden>
+    <header class="result-head">
+      <div>
+        <h2 id="results-heading" tabindex="-1">نتایج بررسی</h2>
+        <p class="result-meta"><span id="results-criteria">—</span> · <span id="results-date">—</span></p>
+      </div>
+      <div class="result-actions">
+        <button id="download-report-btn" type="button" class="btn primary" disabled>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 3v12"/><path d="m7 11 5 5 5-5"/><path d="M5 21h14"/>
+          </svg>
+          دانلود گزارش Excel
+        </button>
+        <button id="new-run-btn" type="button" class="btn ghost">بررسی جدید</button>
+      </div>
+    </header>
+
+    <div class="stats" id="summary-cards">
+      <div class="stat all">
+        <span class="stat-ico" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 5h16M4 12h16M4 19h10"/>
+          </svg>
+        </span>
+        <span class="stat-body">
+          <span class="stat-label">کل رزومه‌ها</span>
+          <strong class="stat-value" id="s-found">۰</strong>
+        </span>
+      </div>
+      <div class="stat ok">
+        <span class="stat-ico" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="9"/><path d="m8.5 12.5 2.5 2.5 4.5-5"/>
+          </svg>
+        </span>
+        <span class="stat-body">
+          <span class="stat-label">تأییدشده</span>
+          <strong class="stat-value" id="s-qualified">۰</strong>
+        </span>
+      </div>
+      <div class="stat bad">
+        <span class="stat-ico" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="9"/><path d="m9 9 6 6M15 9l-6 6"/>
+          </svg>
+        </span>
+        <span class="stat-body">
+          <span class="stat-label">ردشده</span>
+          <strong class="stat-value" id="s-not">۰</strong>
+        </span>
+      </div>
+      <div class="stat warn">
+        <span class="stat-ico" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 9v4"/><path d="M12 17h.01"/>
+            <path d="M10.3 3.9 2.4 18a2 2 0 0 0 1.7 3h15.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/>
+          </svg>
+        </span>
+        <span class="stat-body">
+          <span class="stat-label">نیازمند بررسی</span>
+          <strong class="stat-value" id="s-und">۰</strong>
+        </span>
+      </div>
     </div>
 
-    <div class="card">
-      <h3 id="table-heading">Per-resume breakdown</h3>
-      <div class="row" role="group" aria-label="Filter by status">
-        <button type="button" class="filter-chip" data-filter="all" aria-pressed="true">All</button>
-        <button type="button" class="filter-chip" data-filter="Qualified" aria-pressed="false">Qualified</button>
-        <button type="button" class="filter-chip" data-filter="Not Qualified" aria-pressed="false">Not Qualified</button>
-        <button type="button" class="filter-chip" data-filter="Undetermined" aria-pressed="false">Undetermined</button>
-        <label for="table-search" class="visually-hidden">Search results</label>
-        <input id="table-search" type="search" placeholder="Search filename, name, reason…" autocomplete="off">
+    <div class="card table-card">
+      <div class="table-head">
+        <div class="filters" role="group" aria-label="فیلتر نتایج">
+          <button type="button" class="chip is-active" data-filter="all" aria-pressed="true">همه</button>
+          <button type="button" class="chip ok" data-filter="Qualified" aria-pressed="false">تأییدشده</button>
+          <button type="button" class="chip bad" data-filter="Not Qualified" aria-pressed="false">ردشده</button>
+          <button type="button" class="chip warn" data-filter="Undetermined" aria-pressed="false">نیازمند بررسی</button>
+        </div>
+        <div class="search-wrap">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
+            <circle cx="11" cy="11" r="7"/><path d="m20 20-3.2-3.2"/>
+          </svg>
+          <label for="table-search" class="sr-only">جست‌وجو در نتایج</label>
+          <input id="table-search" type="search" placeholder="جست‌وجوی نام یا فایل…">
+        </div>
       </div>
-      <p id="results-count" class="help" role="status" aria-live="polite"></p>
+
+      <p id="results-count" class="result-count" role="status" aria-live="polite"></p>
+
       <div class="table-scroll">
         <table id="results-table">
-          <caption>One row per processed resume with decision reason</caption>
           <thead>
             <tr>
-              <th scope="col">File</th>
-              <th scope="col">Candidate</th>
-              <th scope="col">Years</th>
-              <th scope="col">Experience</th>
-              <th scope="col">Skills detected</th>
-              <th scope="col">Required found</th>
-              <th scope="col">Required missing</th>
-              <th scope="col">Result</th>
-              <th scope="col">Reason</th>
+              <th scope="col">متقاضی</th>
+              <th scope="col" class="c-years">سابقه اعلام‌شده</th>
+              <th scope="col" class="c-status">وضعیت</th>
+              <th scope="col">دلیل</th>
+              <th scope="col" class="c-act">عملیات</th>
             </tr>
           </thead>
           <tbody id="results-body"></tbody>
         </table>
       </div>
-      <div class="row">
-        <button id="new-run-btn" type="button">Start new screening</button>
+
+      <div id="results-empty" class="empty" hidden>
+        <p>رزومه‌ای با این فیلتر پیدا نشد.</p>
       </div>
+
+      <p id="results-error" class="alert" role="alert" hidden></p>
+      <p class="help copy-confirm" id="copy-confirm" role="status" aria-live="polite"></p>
     </div>
   </section>
-</main>
+
+</div>
+
+<!-- ===================== Resume viewer ===================== -->
+<div id="viewer" class="viewer" hidden>
+  <div class="viewer-backdrop" data-close></div>
+  <div class="viewer-panel" role="dialog" aria-modal="true" aria-labelledby="viewer-title">
+    <header class="viewer-head">
+      <div class="viewer-heading">
+        <h2 id="viewer-title" dir="auto">—</h2>
+        <span id="viewer-badge" class="badge"></span>
+      </div>
+      <div class="viewer-tools">
+        <button id="viewer-zoom-out" type="button" class="icon-btn" aria-label="کوچک‌نمایی">−</button>
+        <span id="viewer-zoom-label" class="zoom-label">۱۰۰٪</span>
+        <button id="viewer-zoom-in" type="button" class="icon-btn" aria-label="بزرگ‌نمایی">+</button>
+        <a id="viewer-download" class="icon-btn" aria-label="دانلود فایل" download>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 3v12"/><path d="m7 11 5 5 5-5"/><path d="M5 21h14"/>
+          </svg>
+        </a>
+        <button id="viewer-close" type="button" class="icon-btn close" aria-label="بستن">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <path d="M6 6l12 12M18 6 6 18"/>
+          </svg>
+        </button>
+      </div>
+    </header>
+    <div class="viewer-body" id="viewer-body"></div>
+  </div>
+</div>
 
 <script src="js/app_setup.js"></script>
 <script src="js/app_progress.js"></script>

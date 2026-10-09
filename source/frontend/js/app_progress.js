@@ -1,97 +1,98 @@
-/* Progress: poll GET /api/runs/{id} every 2s, pause/resume/cancel. */
+/* Progress: polls the real run status, never a fake bar. */
 (function () {
   "use strict";
   var timer = null;
   var runId = null;
-  var criteriaText = "";
 
   function $(id) { return document.getElementById(id); }
-  function show(id, visible) { $(id).hidden = !visible; }
-  function pct(done, total) { return total > 0 ? Math.round((done / total) * 100) : 0; }
+  function faNum(v) { return window.App.faNum(v); }
 
   function criteriaSummary(c) {
     var parts = [];
-    if (c && c.minYears !== null && c.minYears !== undefined && c.minYears !== "") parts.push("min " + c.minYears + " yrs");
-    if (c && c.keywords && c.keywords.length) parts.push("keywords: " + c.keywords.join(", "));
+    if (c && c.minYears !== null && c.minYears !== undefined && c.minYears !== "") {
+      parts.push("حداقل " + faNum(c.minYears) + " سال");
+    }
+    if (c && c.keywords && c.keywords.length) parts.push(c.keywords.join("، "));
     return parts.join(" · ") || "—";
   }
 
-  function render(data) {
-    var found = data.found || 0;
-    var processed = data.processed || 0;
-    var p = pct(processed, found);
-    $("progress-fill").style.width = p + "%";
-    $("progress-bar").setAttribute("aria-valuenow", String(p));
-    $("progress-text").textContent = processed + " / " + found + " (" + p + "%)";
-    $("c-processed").textContent = processed;
-    $("c-qualified").textContent = data.qualified || 0;
-    $("c-not").textContent = data.notQualified || 0;
-    $("c-und").textContent = data.undetermined || 0;
-    if (data.results && data.results.length) {
-      var last = data.results[data.results.length - 1];
-      $("progress-current").textContent = last.filename || "—";
-    }
-    $("pause-btn").textContent = data.state === "paused" ? "Resume" : "Pause";
+  function render(d) {
+    var found = d.found || 0;
+    var done = d.processed || 0;
+    var pct = found > 0 ? Math.round((done / found) * 100) : 0;
+
+    $("progress-fill").style.width = pct + "%";
+    $("progress-fill").parentElement.setAttribute("aria-valuenow", String(pct));
+    $("progress-text").textContent = faNum(done) + " از " + faNum(found) + " رزومه";
+
+    $("c-processed").textContent = faNum(done);
+    $("c-qualified").textContent = faNum(d.qualified || 0);
+    $("c-not").textContent = faNum(d.notQualified !== undefined ? d.notQualified : (d.not_qualified || 0));
+    $("c-und").textContent = faNum(d.undetermined || 0);
+
+    var last = (d.results && d.results.length) ? d.results[d.results.length - 1] : null;
+    $("progress-current").textContent = last && last.filename ? last.filename : "";
+
+    $("pause-btn").textContent = d.state === "paused" ? "ادامه" : "توقف موقت";
   }
 
   function poll() {
-    fetch("/api/runs/" + encodeURIComponent(runId)).then(function (res) {
-      if (!res.ok) throw new Error("Status check failed (" + res.status + ")");
-      return res.json();
-    }).then(function (data) {
-      // Backend may use notQualified or not_qualified; normalize.
-      if (data.not_qualified !== undefined && data.notQualified === undefined) data.notQualified = data.not_qualified;
-      render(data);
-      if (data.state === "finished" || data.state === "cancelled") {
-        stop();
-        window.App.results.show(data);
-      }
-    }).catch(function (err) {
-      var el = $("progress-error");
-      el.textContent = err.message || "Progress update failed.";
-      el.hidden = false;
-    });
+    fetch("/api/runs/" + encodeURIComponent(runId))
+      .then(function (r) {
+        if (!r.ok) throw new Error("بررسی وضعیت ناموفق بود.");
+        return r.json();
+      })
+      .then(function (d) {
+        render(d);
+        if (d.state === "finished" || d.state === "cancelled") {
+          stop();
+          window.App.results.show(d);
+        }
+      })
+      .catch(function (e) {
+        var el = $("progress-error");
+        el.textContent = e.message || "ارتباط با سرور قطع شد.";
+        el.hidden = false;
+      });
   }
 
   function stop() { if (timer) { clearInterval(timer); timer = null; } }
 
-  function begin(id, folderPath, criteria) {
+  function begin(id, folderName, criteria) {
     runId = id;
-    criteriaText = criteriaSummary(criteria);
     stop();
     var err = $("progress-error");
     err.hidden = true; err.textContent = "";
+
     $("screen-setup").hidden = true;
     $("screen-results").hidden = true;
     $("screen-progress").hidden = false;
-    $("progress-folder").textContent = folderPath;
-    $("progress-criteria").textContent = criteriaText;
+
+    $("progress-folder").textContent = folderName || "—";
+    $("progress-criteria").textContent = criteriaSummary(criteria);
+
     poll();
-    timer = setInterval(poll, 2000);
+    timer = setInterval(poll, 1500);
   }
 
-  function pauseToggle() {
+  function togglePause() {
     if (!runId) return;
-    fetch("/api/runs/" + encodeURIComponent(runId) + "/pause", { method: "POST" }).then(function (res) {
-      // Resume path: if already paused, backend exposes /resume; try it on conflict.
-      if (res.status === 409) throw new Error("paused");
-      if (!res.ok) throw new Error("Pause failed (" + res.status + ")");
-      poll();
-    }).catch(function () {
-      fetch("/api/runs/" + encodeURIComponent(runId) + "/resume", { method: "POST" }).then(poll);
-    });
+    var action = $("pause-btn").textContent === "ادامه" ? "resume" : "pause";
+    fetch("/api/runs/" + encodeURIComponent(runId) + "/" + action, { method: "POST" })
+      .then(poll)
+      .catch(function () { poll(); });
   }
 
   function cancel() {
     if (!runId) return;
-    if (!window.confirm("Cancel screening? Processed files keep partial results and a report.")) return;
-    fetch("/api/runs/" + encodeURIComponent(runId) + "/cancel", { method: "POST" }).then(function () {
-      poll(); // next poll lands on results with partial data
-    });
+    if (!window.confirm("بررسی لغو شود؟ نتایج فایل‌های پردازش‌شده حفظ می‌شود.")) return;
+    fetch("/api/runs/" + encodeURIComponent(runId) + "/cancel", { method: "POST" })
+      .then(poll)
+      .catch(function () { /* the next poll will surface any real failure */ });
   }
 
   function init() {
-    $("pause-btn").addEventListener("click", pauseToggle);
+    $("pause-btn").addEventListener("click", togglePause);
     $("cancel-btn").addEventListener("click", cancel);
   }
 

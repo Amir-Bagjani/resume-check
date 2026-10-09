@@ -22,6 +22,14 @@ class RunState(str, Enum):
     FINISHED = "finished"
 
 
+class DetectionStatus(str, Enum):
+    """Outcome of looking for an explicitly declared experience value."""
+
+    FOUND = "found"
+    NOT_FOUND = "not_found"
+    AMBIGUOUS = "ambiguous"
+
+
 @dataclass
 class ScreeningCriteria:
     min_years: Optional[float] = None
@@ -32,7 +40,11 @@ class ScreeningCriteria:
 class ResumeFacts:
     filename: str
     candidate_name: str = ""
-    estimated_years: Optional[float] = None
+    # The ONLY experience source for filtering: the number the candidate wrote.
+    declared_experience_years: Optional[float] = None
+    experience_source_text: str = ""
+    experience_source_section: str = ""
+    experience_detection_status: DetectionStatus = DetectionStatus.NOT_FOUND
     skills_detected: list[str] = field(default_factory=list)
     raw_text: str = ""
 
@@ -41,7 +53,10 @@ class ResumeFacts:
 class ResumeResult:
     filename: str
     candidate_name: str = ""
-    estimated_years: Optional[float] = None
+    declared_experience_years: Optional[float] = None
+    experience_source_text: str = ""
+    experience_source_section: str = ""
+    experience_detection_status: DetectionStatus = DetectionStatus.NOT_FOUND
     experience_status: ExperienceStatus = ExperienceStatus.UNKNOWN
     skills_detected: list[str] = field(default_factory=list)
     required_found: list[str] = field(default_factory=list)

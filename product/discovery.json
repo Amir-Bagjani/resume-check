@@ -50,5 +50,8 @@
     "Handling of password-protected, corrupt, or unreadable files: count as Undetermined with reason?",
     "Subfolder recursion: process only top-level folder or include subfolders?",
     "Progress UI details for chunked run: cancel/retry needed in v1?"
-  ]
+  ],
+  "status": "approved",
+  "approved": true,
+  "updatedAt": "2026-10-02T15:37:26.630Z"
 }

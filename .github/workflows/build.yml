@@ -1,0 +1,52 @@
+name: build-standalone
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            exe: dist/ResumeCheck.exe
+            artifact: resumecheck-Windows
+            shell: pwsh
+          - os: macos-latest
+            exe: dist/ResumeCheck.app
+            artifact: resumecheck-macOS
+            shell: bash
+          - os: ubuntu-latest
+            exe: dist/ResumeCheck
+            artifact: resumecheck-Linux
+            shell: bash
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Build
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r source/backend/requirements.txt "pyinstaller==6.22.3"
+          rm -rf build dist
+          pyinstaller --noconfirm packaging/resumecheck.spec
+      - name: Smoke test (Windows)
+        if: runner.os == 'Windows'
+        run: |
+          .\.github\workflows\smoke_win.ps1 -Exe dist\ResumeCheck.exe
+      - name: Smoke test (macOS/Linux)
+        if: runner.os != 'Windows'
+        run: |
+          uv sync --group ci 2>/dev/null || pip install requests >/dev/null
+          python packaging/smoke.py '${{ matrix.exe }}'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: ${{ matrix.exe }}
