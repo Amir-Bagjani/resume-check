@@ -6,7 +6,7 @@ from pathlib import Path
 HERE = Path(SPECPATH)  # noqa: F821
 SOURCE = HERE.parent / "source"
 ICON = HERE / "assets" / "icon.ico"
-ICON_PNG = HERE / "assets" / "icon.png"
+ICON_ICNS = HERE / "assets" / "icon.icns"
 
 datas = [
     (str(SOURCE / "frontend"), "frontend"),
@@ -87,7 +87,7 @@ if is_mac:
     app = BUNDLE(
         exe,
         name="ResumeCheck.app",
-        icon=str(ICON_PNG) if ICON_PNG.is_file() else None,
+        icon=str(ICON_ICNS) if ICON_ICNS.is_file() else None,
         bundle_identifier="com.resumecheck.app",
         info_plist={
             "NSPrincipalClass": "NSApplication",
