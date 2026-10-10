@@ -6,10 +6,37 @@ import os
 import subprocess
 import sys
 import time
+import urllib.parse
 import urllib.request
 
 HEALTH_TIMEOUT = 60.0
 RUN_TIMEOUT = 60.0
+
+
+def _force_utf8_stdio() -> None:
+    # Windows CI console defaults to a legacy code page (e.g. cp1252):
+    # printing the Persian stored name would crash with UnicodeEncodeError.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8")
+        except Exception:
+            pass
+
+
+_force_utf8_stdio()
+
+
+def _force_utf8_stdio() -> None:
+    # Windows CI console defaults to a legacy code page (e.g. cp1252);
+    # Persian print output would crash with UnicodeEncodeError otherwise.
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8")
+        except Exception:
+            pass
+
+
+_force_utf8_stdio()
 
 
 def _read(base: str, path: str, timeout: float = 10.0):
@@ -18,13 +45,15 @@ def _read(base: str, path: str, timeout: float = 10.0):
         return r.status, dict(r.headers), r.read()
 
 
-def _multipart(path: str, data: bytes, field: str = "files") -> tuple[bytes, str]:
+def _multipart(relpath: str, data: bytes, field: str = "files") -> tuple[bytes, str]:
+    # Like a real browser folder upload: the Persian webkitRelativePath
+    # ("batch/رزومه فارسی.docx") as the filename, UTF-8 encoded.
     boundary = "----SmokeB1"
     head = (
-        f"--{boundary}\r\nContent-Disposition: form-data; name=\"{field}\"; "
-        f'filename="batch_cv.docx"; filename*=utf-8\'\'batch%2F{path}\r\n'
+        f'--{boundary}\r\nContent-Disposition: form-data; name="{field}"; '
+        f'filename="{relpath}"\r\n'
         "Content-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document\r\n\r\n"
-    ).encode("ascii")
+    ).encode("utf-8")
     body = head + data + f"\r\n--{boundary}--\r\n".encode("ascii")
     return body, boundary
 
@@ -69,7 +98,7 @@ def _resolve_exe(exe: str) -> str:
 
 def main(exe: str) -> int:
     exe = _resolve_exe(exe)
-    env = dict(os.environ, RESUMECHECK_HEADLESS="1")
+    env = dict(os.environ, RESUMECHECK_HEADLESS="1", PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
     log = open("smoke-server.log", "ab")
     proc = subprocess.Popen(
         [exe], stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, env=env
@@ -96,8 +125,7 @@ def main(exe: str) -> int:
 
         base = f"http://127.0.0.1:{port}"
         fa_name = "رزومه فارسی.docx"
-        quoted = "".join(f"%{b:02X}" for b in fa_name.encode("utf-8"))
-        body, boundary = _multipart(quoted, _docx_bytes())
+        body, boundary = _multipart(f"batch/{fa_name}", _docx_bytes())
         req = urllib.request.Request(
             f"{base}/api/uploads", data=body,
             headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
@@ -128,7 +156,8 @@ def main(exe: str) -> int:
         fname = state["results"][0]["filename"]
         print(f"stored name: {fname}", flush=True)
 
-        status, _, pdf = _read(base, f"/api/runs/{run_id}/resumes/{fname}")
+        # Browsers percent-encode non-ASCII path segments; do the same.
+        status, _, pdf = _read(base, f"/api/runs/{run_id}/resumes/{urllib.parse.quote(fname)}")
         assert status == 200 and len(pdf) > 1000, status
         status, _, xlsx = _read(base, f"/api/runs/{run_id}/report")
         assert status == 200 and xlsx[:2] == b"PK", status

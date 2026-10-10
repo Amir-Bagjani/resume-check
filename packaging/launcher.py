@@ -17,6 +17,15 @@ HEALTH_PATH = "/api/health"
 START_TIMEOUT = 30.0
 STARTUP_WAIT = 8.0
 
+for _stream in (sys.stdout, sys.stderr):
+    # The Windows console defaults to a legacy code page: Persian log lines
+    # from the bundled server would crash with UnicodeEncodeError otherwise.
+    try:
+        _stream.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+del _stream
+
 if getattr(sys, "frozen", False):
     _BASE = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
 else:
