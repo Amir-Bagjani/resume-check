@@ -32,6 +32,11 @@ class StartRunRequest(BaseModel):
     criteria: dict
 
 
+class ReviewRequest(BaseModel):
+    filename: str
+    decision: Literal["approved", "rejected"]
+
+
 def _resolve_folder(folder_path: str) -> Path:
     p = Path(folder_path).expanduser()
     if not p.exists():
@@ -91,6 +96,21 @@ def get_run(run_id: str):
     run = runner.get_run(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="اجرای موردنظر یافت نشد.")
+    return runner.run_to_dict(run)
+
+
+@router.post("/runs/{run_id}/review")
+def review_resume(run_id: str, body: ReviewRequest):
+    status = FinalStatus.QUALIFIED if body.decision == "approved" else FinalStatus.NOT_QUALIFIED
+    try:
+        run = runner.review_resume(run_id, body.filename, status)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="بررسی یا رزومه موردنظر یافت نشد.") from None
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    except Exception:
+        logger.exception("Manual review could not be saved for run %s", run_id)
+        raise HTTPException(status_code=500, detail="تصمیم ذخیره نشد؛ فایل Excel را ببندید و دسترسی و فضای دیسک را بررسی کنید، سپس دوباره تلاش کنید.") from None
     return runner.run_to_dict(run)
 
 
@@ -238,6 +258,7 @@ def download_report(run_id: str):
         report_path,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         filename=Path(report_path).name,
+        headers={"Cache-Control": "no-store"},
     )
 
 

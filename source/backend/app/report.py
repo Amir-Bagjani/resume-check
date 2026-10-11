@@ -3,7 +3,9 @@ from __future__ import annotations
 
 from dataclasses import replace
 from datetime import date
+import os
 from pathlib import Path
+import tempfile
 
 from .locale import (
     UNKNOWN_FA,
@@ -157,6 +159,41 @@ def write_report(
     return path
 
 
+def save_review_report(path: Path, run: ScreeningRun) -> None:
+    """Update decisions in the saved workbook without replacing its metadata or styles."""
+    from openpyxl import load_workbook
+
+    wb = load_workbook(path)
+    temporary = None
+    try:
+        ws = wb[SHEET_TITLE]
+        header = next(row[0].row for row in ws.iter_rows()
+                      if [cell.value for cell in row] == COLUMNS)
+        results = {result.filename: result for result in run.results}
+        seen = []
+        for row in ws.iter_rows(min_row=header + 1):
+            result = results.get(row[0].value)
+            if result is None:
+                raise ValueError("گزارش Excel با نتایج این بررسی مطابقت ندارد.")
+            seen.append(result.filename)
+            row[10].value = final_status_fa(result.final_status.value)
+            row[11].value = result.reason
+        if len(seen) != len(results) or set(seen) != set(results):
+            raise ValueError("گزارش Excel با نتایج این بررسی مطابقت ندارد.")
+        counts = dict(summary_rows(run)[:5])
+        for row in ws.iter_rows(max_row=header - 1):
+            if row[0].value in counts:
+                row[1].value = counts[row[0].value]
+        with tempfile.NamedTemporaryFile(dir=path.parent, suffix=".xlsx", delete=False) as file:
+            temporary = Path(file.name)
+        wb.save(temporary)
+        os.replace(temporary, path)
+    finally:
+        wb.close()
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
 def write_filtered_report(source: Path, run: ScreeningRun, names: dict[str, str], output_dir: Path) -> Path:
     """Filter the saved report, preserving its screening dates, layout and styles."""
     from openpyxl import load_workbook
@@ -167,6 +204,7 @@ def write_filtered_report(source: Path, run: ScreeningRun, names: dict[str, str]
         header = next(row[0].row for row in ws.iter_rows()
                       if [cell.value for cell in row] == COLUMNS)
         kept = []
+        results_by_name = {result.filename: result for result in run.results}
         for index in range(ws.max_row, header, -1):
             name = ws.cell(index, 1).value
             if name not in names:
@@ -174,6 +212,9 @@ def write_filtered_report(source: Path, run: ScreeningRun, names: dict[str, str]
             else:
                 kept.append(name)
                 ws.cell(index, 1).value = names[name]
+                result = results_by_name[name]
+                ws.cell(index, 11).value = final_status_fa(result.final_status.value)
+                ws.cell(index, 12).value = result.reason
         if len(kept) != len(names) or set(kept) != set(names):
             raise ValueError("گزارش Excel با رزومه‌های انتخاب‌شده مطابقت ندارد.")
         results = [result for result in run.results if result.filename in names]

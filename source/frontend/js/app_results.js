@@ -14,6 +14,7 @@
   var previewSession = null;
   var exportReady = false;
   var exporting = false;
+  var reviewPending = null;
 
   function $(id) {
     var el = document.getElementById(id);
@@ -181,13 +182,48 @@
     document.querySelectorAll("[data-export]").forEach(function (button) {
       var status = CATEGORY_STATUS[button.getAttribute("data-export")];
       var count = rows.filter(function (row) { return status === null || row.finalStatus === status; }).length;
-      button.disabled = !exportReady || exporting || count === 0;
+      button.disabled = !exportReady || exporting || !!reviewPending || count === 0;
       button.title = count ? "دانلود " + faNum(count) + " رزومه همراه گزارش Excel" : "در این دسته رزومه‌ای وجود ندارد.";
     });
+    document.querySelectorAll("[data-review]").forEach(function (button) {
+      button.disabled = !exportReady || exporting || !!reviewPending;
+    });
+    $("download-report-btn").disabled = !exportReady || !!reviewPending;
+    $("new-run-btn").disabled = !!reviewPending;
+  }
+
+  async function reviewResume(row, decision) {
+    if (!exportReady || exporting || reviewPending) return;
+    var id = runId;
+    reviewPending = { filename: rowKey(row), decision: decision };
+    $("results-error").hidden = true;
+    renderTable();
+    updateExportButtons();
+    try {
+      var response = await fetch("/api/runs/" + encodeURIComponent(id) + "/review", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ filename: rowKey(row), decision: decision }),
+      });
+      var data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "ذخیره تصمیم ناموفق بود.");
+      if (runId === id) show(data);
+    } catch (error) {
+      if (runId === id) {
+        var message = $("results-error");
+        message.textContent = error instanceof TypeError
+          ? "ارتباط با سرور برقرار نشد؛ تصمیم تأیید نشده است. دوباره تلاش کنید."
+          : (error.message || "ذخیره تصمیم ناموفق بود.");
+        message.hidden = false;
+      }
+    } finally {
+      reviewPending = null;
+      renderTable();
+      updateExportButtons();
+    }
   }
 
   async function downloadCategory(category) {
-    if (!exportReady || exporting) return;
+    if (!exportReady || exporting || reviewPending) return;
     var id = runId;
     var fileName = category + "-resumes.zip";
     var status = $("export-status");
@@ -343,6 +379,24 @@
         '<circle cx="12" cy="12" r="2.6"/></svg><span>مشاهده رزومه</span>';
       btn.addEventListener("click", function () { openViewer(r); });
       act.appendChild(btn);
+      if (r.finalStatus === "Undetermined") {
+        var actions = document.createElement("div");
+        actions.className = "review-actions";
+        ["approved", "rejected"].forEach(function (decision) {
+          var action = document.createElement("button");
+          action.type = "button";
+          action.className = "view-btn";
+          action.setAttribute("data-review", decision);
+          var label = decision === "approved" ? "تأیید" : "رد";
+          action.textContent = reviewPending && reviewPending.filename === key && reviewPending.decision === decision
+            ? "در حال ذخیره…" : label;
+          action.setAttribute("aria-label", label + " رزومه " + (r.candidateName || key));
+          action.disabled = !exportReady || exporting || !!reviewPending;
+          action.addEventListener("click", function () { reviewResume(r, decision); });
+          actions.appendChild(action);
+        });
+        act.appendChild(actions);
+      }
       tr.appendChild(act);
 
       body.appendChild(tr);
@@ -358,6 +412,7 @@
   function show(d) {
     rows = d.results || [];
     runId = d.runId || null;
+    try { sessionStorage.setItem("resumecheck-run", runId || ""); } catch (_) {}
     $("screen-progress").hidden = true;
     $("screen-setup").hidden = true;
     $("screen-results").hidden = false;
@@ -373,7 +428,6 @@
     var ready = (d.state === "finished" || d.state === "cancelled") && !!runId;
     exportReady = ready;
     updateExportButtons();
-    if ($("download-report-btn")) $("download-report-btn").disabled = !ready;
 
     var err = $("results-error");
     if (err) {
@@ -472,6 +526,7 @@
     }
 
     $("new-run-btn").addEventListener("click", function () {
+      try { sessionStorage.removeItem("resumecheck-run"); } catch (_) {}
       activeFilter = "all";
       query = "";
       $("table-search").value = "";
@@ -482,6 +537,22 @@
       });
       window.App.setup.resetToSetup(true);
     });
+
+    var savedRun = null;
+    try { savedRun = sessionStorage.getItem("resumecheck-run"); } catch (_) {}
+    if (savedRun) {
+      fetch("/api/runs/" + encodeURIComponent(savedRun), { cache: "no-store" })
+        .then(function (response) {
+          if (response.status === 404) {
+            try { sessionStorage.removeItem("resumecheck-run"); } catch (_) {}
+          }
+          return response.ok ? response.json() : null;
+        })
+        .then(function (data) {
+          if (data && !runId && (data.state === "finished" || data.state === "cancelled") && !window.App.setup.state.starting) show(data);
+        })
+        .catch(function (error) { console.error("Results restore failed:", error); });
+    }
 
     // Viewer wiring
     $("viewer-close").addEventListener("click", closeViewer);

@@ -5,6 +5,7 @@ import tempfile
 import threading
 import time
 import uuid
+from dataclasses import replace
 from pathlib import Path
 
 from .extraction import analyze_file, list_resume_files
@@ -20,7 +21,7 @@ from .locale import (
 from .models import FinalStatus, ScreeningCriteria, ScreeningRun, RunState
 from .output_writer import REPORT_FILENAME, copy_resumes, make_output_dir
 from .qualification import evaluate
-from .report import criteria_text, write_report
+from .report import criteria_text, save_review_report, write_report
 
 CHUNK_SIZE = 10
 
@@ -313,6 +314,35 @@ def create_run(folder_path: str, criteria: ScreeningCriteria) -> ScreeningRun:
 def get_run(run_id: str) -> ScreeningRun | None:
     with _lock:
         return _runs.get(run_id)
+
+
+def review_resume(run_id: str, filename: str, status: FinalStatus) -> ScreeningRun:
+    with _lock:
+        run = _runs.get(run_id)
+        if run is None:
+            raise KeyError("بررسی موردنظر یافت نشد.")
+        if run.state not in (RunState.FINISHED, RunState.CANCELLED):
+            raise ValueError("ابتدا بررسی رزومه‌ها را پایان دهید.")
+        result = next((r for r in run.results if r.filename == filename), None)
+        if result is None:
+            raise KeyError("رزومه موردنظر یافت نشد.")
+        if status not in (FinalStatus.QUALIFIED, FinalStatus.NOT_QUALIFIED):
+            raise ValueError("تصمیم بررسی نامعتبر است.")
+        if result.final_status != FinalStatus.UNDETERMINED:
+            raise ValueError("فقط رزومه‌های نیازمند بررسی را می‌توان تأیید یا رد کرد.")
+        decision = "تأیید دستی" if status == FinalStatus.QUALIFIED else "رد دستی"
+        reviewed = replace(result, final_status=status, reason=decision + (" — " + result.reason if result.reason else ""))
+        results = [reviewed if r is result else r for r in run.results]
+        updated = replace(run, results=results,
+                          qualified=sum(r.final_status == FinalStatus.QUALIFIED for r in results),
+                          not_qualified=sum(r.final_status == FinalStatus.NOT_QUALIFIED for r in results),
+                          undetermined=sum(r.final_status == FinalStatus.UNDETERMINED for r in results))
+        if not run.output_path:
+            raise OSError("Saved report unavailable")
+        # Publish the new run only after the atomic workbook replacement succeeds.
+        save_review_report(Path(run.output_path) / REPORT_FILENAME, updated)
+        _runs[run_id] = updated
+        return updated
 
 
 def pause_run(run_id: str) -> bool:

@@ -87,6 +87,15 @@ filter. Empty categories are disabled; missing or unreadable files cause a visib
 error instead of a partial archive. A browser Save dialog is used where supported;
 other browsers use their download settings. No destination path needs to be typed.
 
+Needs-review rows also offer **تأیید** and **رد**. A decision is saved atomically
+to the existing Excel report before the table, counts and category exports update.
+The report keeps its screening dates, metadata and formatting. Close the workbook
+in Excel if Windows prevents it from being replaced. A browser refresh restores
+the current results while the backend is running; runs themselves remain in memory
+and are not restored after restarting the application. Saved Excel decisions remain
+on disk for as long as that output folder is retained. Starting a new screening run
+performs the existing automatic classification on that new run.
+
 PDF resumes render inside the existing preview dialog using locally bundled
 PDF.js 6.3.289, including its worker, fonts and image decoders. This works offline
 and does not use the browser's native PDF handler. Preview bytes use a separate

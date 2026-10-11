@@ -489,6 +489,8 @@ p { margin: 0; }
 .view-btn svg { width: 14px; height: 14px; }
 .view-btn:hover { background: var(--brand-soft); border-color: var(--brand); color: var(--brand); }
 .view-btn:focus-visible { outline: none; box-shadow: 0 0 0 4px var(--brand-ring); }
+.review-actions { display: flex; gap: .3rem; margin-top: .35rem; flex-wrap: wrap; }
+.review-actions button:disabled { opacity: .55; cursor: wait; }
 
 .empty { padding: 1.8rem 1rem; text-align: center; color: var(--text-muted); }
 .help.copy-confirm { min-height: 1.1rem; margin-top: .55rem; color: var(--ok); font-weight: 600; font-size: .83rem; }
