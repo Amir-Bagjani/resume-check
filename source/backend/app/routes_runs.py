@@ -1,6 +1,7 @@
 """Screening REST API: upload, run lifecycle, downloads."""
 from __future__ import annotations
 
+import logging
 import tempfile
 from pathlib import Path
 from typing import Optional
@@ -14,6 +15,7 @@ from .extraction import list_resume_files
 from .models import ScreeningCriteria
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 class ScanRequest(BaseModel):
@@ -136,8 +138,12 @@ async def create_upload(files: list[UploadFile] = File(...)):
 
     root = Path(tempfile.gettempdir()) / "resume-check-uploads"
     # Sweep leftovers from an upload that was never processed before adding more.
-    uploads.sweep_stale(root)
-    directory = uploads.new_upload_dir(root)
+    try:
+        uploads.sweep_stale(root)
+        directory = uploads.new_upload_dir(root)
+    except OSError:
+        logger.exception("Cannot create upload staging directory")
+        raise HTTPException(status_code=507, detail="امکان ذخیره موقت فایل‌ها وجود ندارد؛ دسترسی و فضای دیسک را بررسی کنید.") from None
     total = 0
     accepted: list[str] = []
     rejected: list[str] = []
@@ -150,7 +156,7 @@ async def create_upload(files: list[UploadFile] = File(...)):
             # The client sends the browser-provided file name, which is the
             # folder-relative path (a/b/cv.docx). Keeping it means two resumes that
             # share a name in different sub-folders do not overwrite each other.
-            data = await upload.read()
+            data = await upload.read(uploads.MAX_FILE_BYTES + 1)
             total += len(data)
             if total > uploads.MAX_TOTAL_BYTES:
                 raise HTTPException(status_code=413, detail="حجم کل فایل‌ها بیش از حد مجاز است.")
@@ -162,7 +168,12 @@ async def create_upload(files: list[UploadFile] = File(...)):
     except HTTPException:
         uploads.cleanup_upload(directory)
         raise
+    except OSError:
+        uploads.cleanup_upload(directory)
+        logger.exception("Cannot write uploaded files")
+        raise HTTPException(status_code=507, detail="امکان ذخیره موقت فایل‌ها وجود ندارد؛ دسترسی و فضای دیسک را بررسی کنید.") from None
     except Exception:
+        logger.exception("Cannot stage uploaded files")
         uploads.cleanup_upload(directory)
         raise HTTPException(status_code=400, detail="بارگذاری فایل‌ها ناموفق بود.") from None
 

@@ -76,6 +76,18 @@ From the `source/` directory:
 pytest backend/tests
 ```
 
+Folder-upload UI checks use Node.js 22+ with no npm dependencies. From the project
+root:
+
+```
+node --test source/frontend/tests/setup.test.js
+```
+
+These check file/count/total-size limits before the upload request, Persian paths,
+network failures, retrying folder selection, and server permission messages.
+The release workflow runs both suites on Windows, macOS, and Linux before building
+and testing each standalone artifact; see `../packaging/README.md`.
+
 Covers: declared-experience extraction (Latin/Persian/Arabic-Indic digits, written-out numbers, `+`/`over`/`more than`/`بیش از`/`حدود`, source text and section capture, technology-specific exclusion, conflict resolution), strict filtering against the minimum, fuzzy keyword matching, unreadable-file handling, top-level-only scan, empty-folder 422, missing-folder 404, no-criteria 400, full end-to-end run, PDF and DOCX processing, Persian Excel output with RTL sheet and Jalali dates, output-folder collision suffix, pause/resume/cancel.
 
 ## API

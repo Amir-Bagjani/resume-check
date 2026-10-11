@@ -56,7 +56,8 @@ def _log(msg: str) -> None:
 
 def _health_ok(port: int) -> bool:
     try:
-        with urllib.request.urlopen(f"http://127.0.0.1:{port}{HEALTH_PATH}", timeout=2) as r:
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open(f"http://127.0.0.1:{port}{HEALTH_PATH}", timeout=2) as r:
             return r.status == 200 and json.load(r).get("status") == "ok"
     except Exception:
         return False
@@ -69,13 +70,22 @@ def _pid_alive(pid: int) -> bool:
         # os.kill(pid, 0) is not usable on Windows; ask the kernel instead.
         try:
             import ctypes
+            from ctypes import wintypes
 
             kernel32 = ctypes.windll.kernel32
+            kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+            kernel32.OpenProcess.restype = wintypes.HANDLE
+            kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+            kernel32.WaitForSingleObject.restype = wintypes.DWORD
+            kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+            kernel32.CloseHandle.restype = wintypes.BOOL
             handle = kernel32.OpenProcess(0x00100000, False, pid)
             if not handle:
                 return False
-            kernel32.CloseHandle(handle)
-            return True
+            try:
+                return kernel32.WaitForSingleObject(handle, 0) == 0x00000102  # WAIT_TIMEOUT: still running
+            finally:
+                kernel32.CloseHandle(handle)
         except Exception:
             return False
     try:
@@ -146,7 +156,8 @@ def _open_browser(url: str) -> bool:
 
 def _bind_free() -> tuple[socket.socket, int]:
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    option = socket.SO_EXCLUSIVEADDRUSE if os.name == "nt" else socket.SO_REUSEADDR
+    sock.setsockopt(socket.SOL_SOCKET, option, 1)
     sock.bind(("127.0.0.1", 0))
     return sock, int(sock.getsockname()[1])
 

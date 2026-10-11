@@ -348,7 +348,8 @@ def cancel_run(run_id: str) -> bool:
                 out = make_output_dir(str(parent))
                 processed = [r.filename for r in run.results if r.filename]
                 pairs = copy_resumes(run.folder_path, out, processed)
-                _record_output_files(run, dict(pairs))
+                # The registry lock is already held; do not acquire it again.
+                _output_files[run.run_id] = dict(pairs)
                 written = [w for _, w in pairs]
                 write_report(run, out, copied_count=len(written))
                 run.output_path = str(out)

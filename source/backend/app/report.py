@@ -106,6 +106,7 @@ def write_report(
     missing_count: int = 0,
 ) -> Path:
     from openpyxl import Workbook
+    from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
     wb = Workbook()
@@ -122,6 +123,7 @@ def write_report(
 
     row_index = 1
     for label, value in summary_rows(run, today, copied_count, missing_count):
+        value = ILLEGAL_CHARACTERS_RE.sub("", value) if isinstance(value, str) else value
         ws.cell(row=row_index, column=1, value=label).font = label_font
         ws.cell(row=row_index, column=1).alignment = rtl
         ws.cell(row=row_index, column=2, value=value).alignment = rtl
@@ -139,6 +141,8 @@ def write_report(
     for result in run.results:
         row_index += 1
         for col, value in enumerate(_row_values(result), start=1):
+            # PDF text can contain control characters forbidden in Excel cells.
+            value = ILLEGAL_CHARACTERS_RE.sub("", value) if isinstance(value, str) else value
             cell = ws.cell(row=row_index, column=col, value=value)
             cell.alignment = rtl
             cell.border = border

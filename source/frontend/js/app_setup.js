@@ -89,6 +89,7 @@
 
   /* -------------------------------------------------------------- upload */
   function upload(files) {
+    showError("");
     var usable = [], skipped = 0;
     Array.prototype.forEach.call(files, function (f) {
       if (accepted(f.name)) usable.push(f); else skipped++;
@@ -99,6 +100,18 @@
       setStatus(skipped
         ? "در این پوشه فایل PDF یا DOCX پیدا نشد."
         : "پوشه انتخاب‌شده خالی است.", true);
+      return;
+    }
+
+    var tooLarge = usable.some(function (f) { return f.size > 32 * 1024 * 1024; });
+    var totalBytes = usable.reduce(function (sum, f) { return sum + f.size; }, 0);
+    var limitError = usable.length > 500 ? "حداکثر ۵۰۰ فایل را انتخاب کنید."
+      : tooLarge ? "حجم هر فایل باید حداکثر ۳۲ مگابایت باشد."
+      : totalBytes > 512 * 1024 * 1024 ? "حجم کل فایل‌ها باید حداکثر ۵۱۲ مگابایت باشد." : "";
+    if (limitError) {
+      clearFolder();
+      setStatus(limitError, true);
+      showError(limitError);
       return;
     }
 
@@ -120,6 +133,9 @@
     });
 
     fetch("/api/uploads", { method: "POST", body: form })
+      .catch(function () {
+        throw new Error("بارگذاری انجام نشد. پنجره ResumeCheck را باز نگه دارید و مطمئن شوید فایل‌های انتخاب‌شده روی این رایانه قابل خواندن‌اند.");
+      })
       .then(function (res) {
         return res.json().catch(function () { return {}; }).then(function (body) {
           if (!res.ok) throw new Error(body.detail || ("بارگذاری ناموفق بود (" + res.status + ")"));

@@ -509,6 +509,39 @@ def test_excel_year_cell_has_no_trailing_decimal(tmp_path: Path):
     assert ws.cell(row=header_row + 1, column=3).value == "۷"
 
 
+def test_excel_removes_illegal_controls_from_all_input_cells(tmp_path: Path):
+    from openpyxl import load_workbook
+
+    from backend.app.models import ResumeResult
+
+    controls = "".join(chr(n) for n in range(32) if n not in (9, 10, 13))
+    clean = "ㅤFront-End توسعه‌دهنده\tReact\n۵ سال\rتهران"
+    dirty = clean + controls
+    run = _sample_run()
+    run.criteria.keywords = [dirty]
+    result = ResumeResult(
+        filename=dirty,
+        candidate_name=dirty,
+        experience_source_text=dirty,
+        experience_source_section=dirty,
+        skills_detected=[dirty],
+        required_found=[dirty],
+        required_missing=[dirty],
+        reason=dirty,
+    )
+    run.results = [result]
+
+    ws = load_workbook(_report_for(run, tmp_path)).active
+    header_row = next(i for i, row in enumerate(ws.rows, start=1) if row[0].value == "نام فایل رزومه")
+    for col in (1, 2, 4, 5, 8, 9, 10, 12):
+        assert ws.cell(row=header_row + 1, column=col).value == clean
+    summary = dict((row[0].value, row[1].value) for row in ws.iter_rows(max_row=9))
+    assert clean in summary["معیارهای غربال استفاده‌شده"]
+    # Sanitizing the report must leave the extracted text and criteria intact.
+    assert result.experience_source_text == dirty
+    assert run.criteria.keywords == [dirty]
+
+
 def test_output_collision_suffix(tmp_path: Path):
     from backend.app.output_writer import make_output_dir
     a = make_output_dir(str(tmp_path))
@@ -1006,6 +1039,82 @@ def test_upload_rejects_folder_without_supported_files():
     c = _client()
     res = _upload(c, [("notes.txt", b"x"), ("data.json", b"{}")])
     assert res.status_code == 422
+
+
+@pytest.mark.parametrize("name", ["CON.docx", "nul.pdf", "Aux .docx", "COM1.pdf", "LPT9.docx"])
+def test_upload_names_are_valid_on_windows(name):
+    from backend.app.uploads import safe_filename
+
+    assert safe_filename(name) == "_" + name
+
+
+def test_upload_does_not_overwrite_colliding_names(tmp_path: Path):
+    from backend.app.uploads import store_file
+
+    names = ["batch/cv.docx", "batch/CV.docx", "batch/cv+.docx", "batch/cv#.docx"]
+    paths = [store_file(tmp_path, name, str(i).encode()) for i, name in enumerate(names)]
+    assert len({str(p).casefold() for p in paths}) == len(names)
+    assert [(tmp_path / p).read_bytes() for p in paths] == [b"0", b"1", b"2", b"3"]
+
+
+def test_output_does_not_overwrite_names_differing_by_case(tmp_path: Path):
+    from backend.app.output_writer import copy_resumes
+
+    source = tmp_path / "input"
+    source.mkdir()
+    for sub, name, data in (("first", "a-CV.docx", b"first"), ("FIRST-a", "cv.docx", b"second")):
+        folder = source / sub
+        folder.mkdir()
+        (folder / name).write_bytes(data)
+    output = tmp_path / "output"
+    output.mkdir()
+    # Flattened names collide by case despite different source paths.
+    pairs = copy_resumes(str(source), output, ["first/a-CV.docx", "FIRST-a/cv.docx"])
+    assert len(pairs) == 2
+    assert len({written.casefold() for _, written in pairs}) == 2
+    assert [(output / written).read_bytes() for _, written in pairs] == [b"first", b"second"]
+
+
+def test_upload_reads_only_up_to_the_file_limit(tmp_path: Path, monkeypatch):
+    import asyncio
+    from fastapi import HTTPException
+    from backend.app import routes_runs, uploads
+
+    monkeypatch.setattr(routes_runs.tempfile, "gettempdir", lambda: str(tmp_path))
+    monkeypatch.setattr(uploads, "MAX_FILE_BYTES", 16)
+    read_sizes = []
+
+    class LargeUpload:
+        filename = "batch/large.pdf"
+
+        async def read(self, size=-1):
+            read_sizes.append(size)
+            return b"x" * 17
+
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(routes_runs.create_upload([LargeUpload()]))
+    assert exc.value.status_code == 400
+    assert read_sizes == [17]
+    assert not list((tmp_path / "resume-check-uploads").iterdir())
+
+
+@pytest.mark.parametrize("operation", ["new_upload_dir", "store_file"])
+def test_upload_unwritable_temp_folder_returns_a_clear_error(tmp_path: Path, monkeypatch, operation):
+    from backend.app import routes_runs
+    from backend.app import uploads
+
+    def denied(*args):
+        raise PermissionError("test: access denied")
+
+    monkeypatch.setattr(routes_runs.tempfile, "gettempdir", lambda: str(tmp_path))
+    monkeypatch.setattr(uploads, operation, denied)
+    client = _client()
+    res = _upload(client, [("cv.pdf", b"%PDF")])
+    assert res.status_code == 507
+    assert "دسترسی" in res.json()["detail"]
+    assert client.get("/api/health").status_code == 200
+    staging = tmp_path / "resume-check-uploads"
+    assert not staging.exists() or not list(staging.iterdir())
 
 
 def test_upload_rejects_path_traversal_filename(tmp_path: Path):

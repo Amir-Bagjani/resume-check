@@ -43,12 +43,13 @@ def _unique_name(desired: str, taken: set[str]) -> str:
     overwrite each other, so a counter is appended to the stem. Persian names,
     spaces and other characters are preserved as-is.
     """
-    if desired not in taken:
+    taken = {name.casefold() for name in taken}
+    if desired.casefold() not in taken:
         return desired
     path = Path(desired)
     stem, suffix = path.stem, path.suffix
     i = 2
-    while f"{stem}-{i}{suffix}" in taken:
+    while f"{stem}-{i}{suffix}".casefold() in taken:
         i += 1
     return f"{stem}-{i}{suffix}"
 

@@ -17,6 +17,8 @@ import time
 import uuid
 from pathlib import Path
 
+from .output_writer import _unique_name
+
 SUPPORTED_EXTENSIONS = {".pdf", ".docx"}
 
 # Upper bound per file and per upload, so a mistaken selection cannot exhaust disk.
@@ -29,6 +31,7 @@ MAX_FILES = 500
 STALE_AFTER_SECONDS = 6 * 60 * 60
 
 _UNSAFE_CHARS = re.compile(r"[^A-Za-z0-9؀-ۿ\u200c _.\-()،؛]+")
+_WINDOWS_DEVICE_NAME = re.compile(r"^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])$", re.IGNORECASE)
 
 
 class UploadError(Exception):
@@ -44,6 +47,8 @@ def safe_filename(name: str, fallback: str = "resume") -> str:
     if len(base) > 120:
         stem, dot, ext = base.rpartition(".")
         base = (stem[: 120 - len(dot) - len(ext)] + dot + ext) if dot else base[:120]
+    if _WINDOWS_DEVICE_NAME.fullmatch(base.split(".", 1)[0].rstrip()):
+        base = "_" + base
     return base
 
 
@@ -95,6 +100,7 @@ def store_file(directory: Path, filename: str, data: bytes, relative: str = "") 
     directory = directory.resolve()
     target = _resolve_inside(directory, staged)
     target.parent.mkdir(parents=True, exist_ok=True)
+    target = target.with_name(_unique_name(target.name, {p.name for p in target.parent.iterdir()}))
     target.write_bytes(data)
     # Return the relative POSIX path from the original directory, not the resolved one
     try:

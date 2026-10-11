@@ -31,8 +31,10 @@ Both scripts create `.venv-pkg`, pin `pyinstaller==6.22.3` plus pinned
 
 Release builds via tag push (`v*`) or manual run: `.github/workflows/build.yml`
 builds on `windows-latest` / `macos-latest` / `ubuntu-latest`, runs a real
-headless smoke test of the produced binary (upload Unicode-named DOCX → run →
-viewer → Excel → shutdown), then uploads one artifact per OS:
+backend/launcher test suite on each OS, then a headless smoke test of the produced
+binary (12 DOCX resumes, Persian names, subfolders, case/sanitization collisions,
+Windows reserved names, and a file over 1 MB → run → byte-identical downloads →
+readable Persian Excel). An artifact is uploaded only after both checks pass:
 
 | Artifact | File |
 |---|---|
@@ -43,6 +45,17 @@ viewer → Excel → shutdown), then uploads one artifact per OS:
 Manual trigger: repo → Actions → `build-standalone` → Run workflow.
 Tag release: `git tag v1.0.0 && git push origin v1.0.0`.
 
+Run the same binary check locally after a build (with the source requirements
+installed in the Python environment used for the test):
+
+```powershell
+python packaging/smoke.py dist\ResumeCheck.exe
+```
+
+On Linux: `python packaging/smoke.py ./dist/ResumeCheck`.
+The smoke test uses isolated app data on Windows/Linux and stops its own process
+tree after checking the output.
+
 ## End-user run
 
 1. Double-click `ResumeCheck.exe` / `ResumeCheck.app` / `ResumeCheck`.
@@ -50,6 +63,23 @@ Tag release: `git tag v1.0.0 && git push origin v1.0.0`.
 3. Pick the resume folder, set criteria, run, view results, download Excel.
 4. A small window stays open while the app runs — use **خروج از برنامه** to stop it.
    Closing the browser tab does NOT stop the backend; use the window's exit button.
+
+When updating, exit the old app first, then launch the newly built executable and
+use its browser URL. An existing instance otherwise keeps serving the old version.
+
+## Upload troubleshooting (Windows)
+
+- Input resumes must be PDF or DOCX; Excel is the output format.
+- Keep the ResumeCheck window open while selecting and processing files.
+- Each file is limited to 32 MB, with at most 500 files and 512 MB total per upload.
+- For a network/upload error, verify that the selected files are locally readable
+  (download cloud-only files first), then choose the folder again.
+- Disk/permission errors return a Persian message. Exception details are logged
+  at `%LOCALAPPDATA%\ResumeCheck\logs\server.log`; local health checks bypass the
+  system proxy. Check this log when reporting a failure.
+
+Filename sanitization avoids Windows device names and adds suffixes on collisions,
+including names differing only by case. Original input files are never renamed.
 
 Data dirs (logs, single-instance lock): `%LOCALAPPDATA%\ResumeCheck`,
 `~/Library/Application Support/ResumeCheck`, `~/.local/share/resume-check`.

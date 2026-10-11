@@ -1,10 +1,12 @@
 """Cross-platform EXE smoke test: start binary, upload Unicode-named DOCX, run, check viewer+Excel."""
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.parse
 import urllib.request
@@ -25,60 +27,57 @@ def _force_utf8_stdio() -> None:
 
 _force_utf8_stdio()
 
-
-def _force_utf8_stdio() -> None:
-    # Windows CI console defaults to a legacy code page (e.g. cp1252);
-    # Persian print output would crash with UnicodeEncodeError otherwise.
-    for stream in (sys.stdout, sys.stderr):
-        try:
-            stream.reconfigure(encoding="utf-8")
-        except Exception:
-            pass
-
-
-_force_utf8_stdio()
+# All smoke-test requests are local, including on machines with a system proxy.
+_HTTP = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 
 def _read(base: str, path: str, timeout: float = 10.0):
     req = urllib.request.Request(f"{base}{path}")
-    with urllib.request.urlopen(req, timeout=timeout) as r:
+    with _HTTP.open(req, timeout=timeout) as r:
         return r.status, dict(r.headers), r.read()
 
 
-def _multipart(relpath: str, data: bytes, field: str = "files") -> tuple[bytes, str]:
+def _multipart(items: list[tuple[str, bytes]]) -> tuple[bytes, str]:
     # Like a real browser folder upload: the Persian webkitRelativePath
     # ("batch/رزومه فارسی.docx") as the filename, UTF-8 encoded.
     boundary = "----SmokeB1"
-    head = (
-        f'--{boundary}\r\nContent-Disposition: form-data; name="{field}"; '
-        f'filename="{relpath}"\r\n'
-        "Content-Type: application/vnd.openxmlformats-officedocument.wordprocessingml.document\r\n\r\n"
-    ).encode("utf-8")
-    body = head + data + f"\r\n--{boundary}--\r\n".encode("ascii")
-    return body, boundary
+    parts = []
+    for relpath, data in items:
+        head = (
+            f'--{boundary}\r\nContent-Disposition: form-data; name="files"; '
+            f'filename="{relpath}"\r\n'
+            "Content-Type: application/octet-stream\r\n\r\n"
+        ).encode("utf-8")
+        parts.append(head + data + b"\r\n")
+    return b"".join(parts) + f"--{boundary}--\r\n".encode("ascii"), boundary
 
 
-def _docx_bytes() -> bytes:
+def _docx_bytes(candidate: str, large: bool = False) -> bytes:
     from docx import Document
     from io import BytesIO
 
     doc = Document()
-    doc.add_paragraph("Smoke Candidate")
+    doc.add_paragraph(candidate)
     doc.add_paragraph("Over 7 years in software development.")
     doc.add_paragraph("React Python Docker")
     buf = BytesIO()
     doc.save(buf)
+    if large:
+        from zipfile import ZipFile, ZIP_STORED
+        # A valid DOCX over 1 MB exercises multipart's disk-backed temporary file.
+        with ZipFile(buf, "a") as archive:
+            archive.writestr("word/media/spool-test.bin", b"x" * (2 * 1024 * 1024), compress_type=ZIP_STORED)
     return buf.getvalue()
 
 
-def _instance_port() -> int | None:
+def _instance_port(env: dict) -> int | None:
     if os.name == "nt":
-        base = os.environ.get("LOCALAPPDATA") or str(os.path.expanduser("~\\AppData\\Local"))
+        base = env.get("LOCALAPPDATA") or str(os.path.expanduser("~\\AppData\\Local"))
         inst = os.path.join(base, "ResumeCheck", "instance.json")
     elif sys.platform == "darwin":
         inst = os.path.expanduser("~/Library/Application Support/ResumeCheck/instance.json")
     else:
-        xdg = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
+        xdg = env.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
         inst = os.path.join(xdg, "resume-check", "instance.json")
     try:
         with open(inst, encoding="utf-8") as f:
@@ -98,7 +97,9 @@ def _resolve_exe(exe: str) -> str:
 
 def main(exe: str) -> int:
     exe = _resolve_exe(exe)
-    env = dict(os.environ, RESUMECHECK_HEADLESS="1", PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
+    test_data = tempfile.TemporaryDirectory(prefix="resume-check-smoke-")
+    env = dict(os.environ, RESUMECHECK_HEADLESS="1", PYTHONUTF8="1", PYTHONIOENCODING="utf-8",
+               LOCALAPPDATA=test_data.name, XDG_DATA_HOME=test_data.name)
     log = open("smoke-server.log", "ab")
     proc = subprocess.Popen(
         [exe], stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT, env=env
@@ -107,7 +108,7 @@ def main(exe: str) -> int:
         deadline = time.time() + HEALTH_TIMEOUT
         port = None
         while time.time() < deadline:
-            port = _instance_port()
+            port = _instance_port(env)
             if port:
                 try:
                     status, _, body = _read(f"http://127.0.0.1:{port}", "/api/health")
@@ -124,23 +125,30 @@ def main(exe: str) -> int:
             return 1
 
         base = f"http://127.0.0.1:{port}"
+        status, _, html = _read(base, "/")
+        assert status == 200 and "غربالگری رزومه".encode() in html
         fa_name = "رزومه فارسی.docx"
-        body, boundary = _multipart(f"batch/{fa_name}", _docx_bytes())
+        names = [fa_name, f"تیم اول/{fa_name}", f"تیم دوم/{fa_name}",
+                 "cv.docx", "CV.docx", "cv+.docx", "cv#.docx", "CON.docx",
+                 "AUX/رزومه.docx", "first/a-CV.docx", "FIRST-a/cv.docx", "large.docx"]
+        items = [(f"batch/{name}", _docx_bytes(f"Smoke Candidate {i}", large=name == "large.docx"))
+                 for i, name in enumerate(names)]
+        body, boundary = _multipart(items)
         req = urllib.request.Request(
             f"{base}/api/uploads", data=body,
             headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
         )
-        with urllib.request.urlopen(req, timeout=15) as r:
+        with _HTTP.open(req, timeout=30) as r:
             up = json.load(r)
         upload_id = up["uploadId"]
-        assert up["fileCount"] == 1, up
+        assert up["fileCount"] == len(items), up
 
         payload = json.dumps({"criteria": {"minYears": 5, "keywords": ["React"]}, "outputFolder": None}).encode()
         req = urllib.request.Request(
             f"{base}/api/uploads/{upload_id}/run", data=payload,
             headers={"Content-Type": "application/json"},
         )
-        with urllib.request.urlopen(req, timeout=15) as r:
+        with _HTTP.open(req, timeout=30) as r:
             run_id = json.load(r)["runId"]
 
         deadline = time.time() + RUN_TIMEOUT
@@ -152,26 +160,42 @@ def main(exe: str) -> int:
                 break
             time.sleep(0.5)
         assert state.get("state") == "finished", state
-        assert state["found"] == 1 and state["processed"] == 1, state
-        fname = state["results"][0]["filename"]
-        print(f"stored name: {fname}", flush=True)
-
-        # Browsers percent-encode non-ASCII path segments; do the same.
-        status, _, pdf = _read(base, f"/api/runs/{run_id}/resumes/{urllib.parse.quote(fname)}")
-        assert status == 200 and len(pdf) > 1000, status
+        assert state["found"] == len(items) and state["processed"] == len(items), state
+        assert state["qualified"] == len(items), state
+        viewed = []
+        for result in state["results"]:
+            fname = result["filename"]
+            status, _, content = _read(base, f"/api/runs/{run_id}/resumes/{urllib.parse.quote(fname)}")
+            assert status == 200, fname
+            viewed.append(hashlib.sha256(content).hexdigest())
+        assert sorted(viewed) == sorted(hashlib.sha256(data).hexdigest() for _, data in items)
         status, _, xlsx = _read(base, f"/api/runs/{run_id}/report")
         assert status == 200 and xlsx[:2] == b"PK", status
-        print(f"smoke OK: viewer={len(pdf)}B excel={len(xlsx)}B", flush=True)
+        from io import BytesIO
+        from openpyxl import load_workbook
+        rows = list(load_workbook(BytesIO(xlsx)).active.values)
+        header = next(i for i, row in enumerate(rows) if row[0] == "نام فایل رزومه")
+        assert len(rows[header + 1:]) == len(items)
+        assert proc.poll() is None, "launcher exited during upload/run"
+        print(f"smoke OK: {len(items)} resumes, >1 MB upload, viewer integrity, Persian Excel", flush=True)
         return 0
     except Exception as exc:
         print(f"SMOKE FAILED: {exc}", flush=True)
         return 1
     finally:
-        proc.terminate()
+        if os.name == "nt" and proc.poll() is None:
+            # Windows onefile has a bootloader parent and a server child.
+            subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+        elif proc.poll() is None:
+            proc.terminate()
         try:
             proc.wait(timeout=15)
         except Exception:
             proc.kill()
+            proc.wait(timeout=5)
+        log.close()
+        test_data.cleanup()
 
 
 if __name__ == "__main__":
