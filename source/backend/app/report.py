@@ -1,6 +1,7 @@
 """Single-sheet xlsx report: Persian summary block on top, then per-resume rows."""
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import date
 from pathlib import Path
 
@@ -15,7 +16,7 @@ from .locale import (
     to_persian_digits,
 )
 from .output_writer import REPORT_FILENAME
-from .models import ResumeResult, ScreeningCriteria, ScreeningRun
+from .models import FinalStatus, ResumeResult, ScreeningCriteria, ScreeningRun
 
 SHEET_TITLE = "گزارش غربال"
 
@@ -154,3 +155,40 @@ def write_report(
     path = output_dir / REPORT_FILENAME
     wb.save(path)
     return path
+
+
+def write_filtered_report(source: Path, run: ScreeningRun, names: dict[str, str], output_dir: Path) -> Path:
+    """Filter the saved report, preserving its screening dates, layout and styles."""
+    from openpyxl import load_workbook
+
+    wb = load_workbook(source)
+    try:
+        ws = wb[SHEET_TITLE]
+        header = next(row[0].row for row in ws.iter_rows()
+                      if [cell.value for cell in row] == COLUMNS)
+        kept = []
+        for index in range(ws.max_row, header, -1):
+            name = ws.cell(index, 1).value
+            if name not in names:
+                ws.delete_rows(index)
+            else:
+                kept.append(name)
+                ws.cell(index, 1).value = names[name]
+        if len(kept) != len(names) or set(kept) != set(names):
+            raise ValueError("گزارش Excel با رزومه‌های انتخاب‌شده مطابقت ندارد.")
+        results = [result for result in run.results if result.filename in names]
+        selected = replace(run, results=results, found=len(results), processed=len(results),
+                           qualified=sum(r.final_status == FinalStatus.QUALIFIED for r in results),
+                           not_qualified=sum(r.final_status == FinalStatus.NOT_QUALIFIED for r in results),
+                           undetermined=sum(r.final_status == FinalStatus.UNDETERMINED for r in results))
+        # Only the first six summary rows are counts; keep the saved metadata.
+        values = dict(summary_rows(selected, copied_count=len(results))[:6])
+        values["تعداد فایل‌های کپی‌نشده"] = "۰"
+        for row in ws.iter_rows(max_row=header - 1):
+            if row[0].value in values:
+                row[1].value = values[row[0].value]
+        path = output_dir / REPORT_FILENAME
+        wb.save(path)
+        return path
+    finally:
+        wb.close()

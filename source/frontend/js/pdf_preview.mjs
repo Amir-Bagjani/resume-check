@@ -34,7 +34,8 @@ export function openPreview(body, runId, filename, signal, onReady, onError) {
   }, { signal });
   eventBus.on("pagerendered", ({ error }) => {
     if (error) {
-      onError(0, "نمایش این PDF ممکن نشد. فایل ممکن است خراب یا رمزگذاری‌شده باشد.");
+      console.error("PDF preview [page render]:", error);
+      onError(0, "رندر صفحه PDF ناموفق بود. جزئیات در کنسول مرورگر ثبت شده است.");
     } else if (!ready) {
       ready = true;
       onReady();
@@ -50,6 +51,7 @@ export function openPreview(body, runId, filename, signal, onReady, onError) {
 
   (async () => {
     let response;
+    let stage = "HTTP request";
     try {
       // No PDF URL navigation, PDF MIME type, or download filename in this request.
       response = await fetch("/api/runs/" + encodeURIComponent(runId) + "/preview", {
@@ -57,11 +59,22 @@ export function openPreview(body, runId, filename, signal, onReady, onError) {
         body: JSON.stringify({ filename }), signal,
       });
       if (!response.ok) {
-        onError(response.status);
+        const detail = await response.json().catch(() => ({}));
+        console.error("PDF preview [HTTP request]:", response.status, detail.code || "http_error");
+        onError(response.status, typeof detail.detail === "string" ? detail.detail : "دریافت PDF از سرور ناموفق بود.");
         return;
       }
+      stage = "PDF bytes";
       const data = new Uint8Array(await response.arrayBuffer());
       if (signal.aborted) return;
+      if (!data.length) throw new Error("Empty PDF response");
+      stage = "worker initialization";
+      const worker = await fetch(GlobalWorkerOptions.workerSrc, { method: "HEAD", signal });
+      if (!worker.ok) throw new Error("PDF worker asset HTTP " + worker.status);
+      if (!/^(text|application)\/(javascript|ecmascript)(;|$)/i.test(worker.headers.get("Content-Type") || "")) {
+        throw new Error("PDF worker asset has an invalid JavaScript MIME type");
+      }
+      stage = "PDF parsing/worker";
       loadingTask = getDocument({
         data, cMapUrl: assets + "cmaps/", cMapPacked: true,
         standardFontDataUrl: assets + "standard_fonts/", wasmUrl: assets + "wasm/",
@@ -73,10 +86,14 @@ export function openPreview(body, runId, filename, signal, onReady, onError) {
       viewer.setDocument(pdf);
     } catch (error) {
       if (!signal.aborted) {
-        console.error("PDF preview failed:", error);
-        onError(0, response && response.ok
-          ? "نمایش این PDF ممکن نشد. فایل ممکن است خراب یا رمزگذاری‌شده باشد."
-          : "ارتباط با سرور برقرار نشد.");
+        console.error("PDF preview [" + stage + "]:", error);
+        const workerFailed = stage === "worker initialization" || /worker/i.test(error.message || "");
+        onError(0, workerFailed
+          ? "راه‌اندازی پردازشگر PDF ناموفق بود. فایل worker و نوع محتوای آن را بررسی کنید."
+          : stage === "HTTP request" ? "ارتباط با سرور برقرار نشد."
+          : stage === "PDF bytes" ? "داده‌های PDF دریافت نشد."
+          : error.name === "PasswordException" ? "این PDF رمزگذاری‌شده است و برای پیش‌نمایش به نسخه بدون رمز نیاز دارد."
+          : "خواندن PDF ناموفق بود. فایل ممکن است نامعتبر یا خراب باشد.");
       }
     }
   })();

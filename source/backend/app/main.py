@@ -1,9 +1,16 @@
+import mimetypes
+
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from .paths import frontend_dir
 from .routes_runs import router as runs_router
+
+# Windows registry MIME registrations can label modules as text/plain.
+mimetypes.add_type("text/javascript", ".mjs")
+mimetypes.add_type("text/javascript", ".js")
+mimetypes.add_type("application/wasm", ".wasm")
 
 app = FastAPI(title="Resume Screening API")
 

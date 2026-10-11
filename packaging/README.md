@@ -33,9 +33,11 @@ Release builds via tag push (`v*`) or manual run: `.github/workflows/build.yml`
 builds on `windows-latest` / `macos-15-intel` (x86_64) / `macos-15` (arm64) /
 `ubuntu-latest`, runs a real
 backend/launcher test suite on each OS, then a headless smoke test of the produced
-binary (12 DOCX resumes, Persian names, subfolders, case/sanitization collisions,
+binary (12 DOCX and two three-page PDF resumes, Persian names, subfolders, case/sanitization collisions,
 Windows reserved names, and a file over 1 MB → run → byte-identical downloads →
-readable Persian Excel). An artifact is uploaded only after both checks pass:
+readable Persian Excel). It also checks every packaged PDF.js asset against the
+source, module/WASM MIME types, and byte-identical binary PDF preview responses.
+An artifact is uploaded only after both checks pass:
 
 | Artifact | File |
 |---|---|
@@ -55,7 +57,7 @@ repositories, subject to the repository's Actions policies and available minutes
 Manual trigger: repo → Actions → `build-standalone` → Run workflow.
 Tag release: `git tag v1.0.0 && git push origin v1.0.0`.
 
-Run the same binary check locally after a build (with the source requirements
+Run the same binary check locally after a build (with `source/backend/requirements-dev.txt`
 installed in the Python environment used for the test):
 
 ```powershell
@@ -70,12 +72,20 @@ tree after checking the output.
 
 1. Double-click `ResumeCheck.exe` / `ResumeCheck.app` / `ResumeCheck`.
 2. Browser opens automatically at `http://127.0.0.1:<port>/`.
-3. Pick the resume folder, set criteria, run, view results, download Excel.
+3. Pick the resume folder, set criteria, run, view results, download Excel or a category ZIP.
 4. A small window stays open while the app runs — use **خروج از برنامه** to stop it.
    Closing the browser tab does NOT stop the backend; use the window's exit button.
 
 When updating, exit the old app first, then launch the newly built executable and
 use its browser URL. An existing instance otherwise keeps serving the old version.
+
+Each results summary card has a ZIP download for all, approved, rejected or
+needs-review resumes, together with a matching Excel report. The saved report's
+metadata, screening dates and formatting are preserved, and counts reflect the
+selected category. Downloads include the whole category, regardless of the table
+filter. Empty categories are disabled; missing or unreadable files cause a visible
+error instead of a partial archive. A browser Save dialog is used where supported;
+other browsers use their download settings. No destination path needs to be typed.
 
 PDF resumes render inside the existing preview dialog using locally bundled
 PDF.js 6.3.289, including its worker, fonts and image decoders. This works offline
@@ -84,6 +94,28 @@ binary POST endpoint without PDF/download headers; explicit downloads still use
 the original download link. Scrolling, text selection and zoom stay in the dialog.
 Closing or switching previews aborts loading and releases the document worker.
 DOCX previews keep the existing download fallback.
+
+The server explicitly registers JavaScript module and WASM MIME types. Windows
+registry associations otherwise can cause `.mjs` files to be served as `text/plain`,
+which Chrome rejects before the viewer can request the PDF. Preview failures log
+their stage in the browser console; missing, unreadable and invalid files have
+separate messages without displaying local paths.
+
+### Final Windows PDF preview check
+
+After building, run the smoke command above, exit any older ResumeCheck instance,
+then launch the new `dist\ResumeCheck.exe` with Chrome and IDM enabled. Screen
+real multi-page PDFs from a user-selected folder, including names with spaces
+and Persian characters; also try a long path and a folder on another drive.
+Open each preview, scroll to the last page, zoom, close/reopen, then switch PDFs.
+Confirm the correct document stays inside the existing modal and no download
+dialog or external viewer opens. In Chrome DevTools → Network, check `.mjs`
+responses have `Content-Type: text/javascript`, the worker loads successfully,
+and the preview POST returns `application/octet-stream` without
+`Content-Disposition`. Try a corrupted PDF and a file removed after screening;
+confirm a clear error and that a subsequent valid preview still works. The
+headless CI smoke checks assets and bytes, but does not verify GUI rendering or
+IDM integration.
 
 ## Upload troubleshooting (Windows)
 

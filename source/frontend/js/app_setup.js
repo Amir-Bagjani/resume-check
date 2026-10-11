@@ -1,4 +1,4 @@
-/* Setup: folder picker, upload, criteria, output destination. Exposes window.App. */
+/* Setup: folder picker, upload and criteria. Exposes window.App. */
 (function () {
   "use strict";
 
@@ -21,7 +21,6 @@
     starting: false,
     keywords: [],
     minYears: null,
-    outputFolder: "",
     runId: null,
   };
 
@@ -214,7 +213,7 @@
     fetch("/api/uploads/" + encodeURIComponent(state.uploadId) + "/run", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ criteria: criteria, outputFolder: state.outputFolder || null }),
+      body: JSON.stringify({ criteria: criteria }),
     })
       .then(function (res) {
         return res.json().catch(function () { return {}; }).then(function (body) {
@@ -263,10 +262,6 @@
       state.minYears = v === "" ? null : Number(v);
       refreshStart();
     });
-    $("output-folder").addEventListener("input", function (e) {
-      state.outputFolder = e.target.value.trim();
-    });
-
     $("start-btn").addEventListener("click", start);
     renderChips();
     refreshStart();

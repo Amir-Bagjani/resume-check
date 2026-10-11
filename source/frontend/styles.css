@@ -345,7 +345,7 @@ p { margin: 0; }
   margin-bottom: .9rem;
 }
 .stat {
-  display: flex; align-items: center; gap: .65rem;
+  display: flex; flex-wrap: wrap; align-items: center; gap: .65rem;
   padding: .8rem .95rem;
   background: var(--surface);
   border: 1px solid rgba(16,24,40,.06);
@@ -363,6 +363,10 @@ p { margin: 0; }
 .stat-body { display: flex; flex-direction: column; min-width: 0; }
 .stat-label { font-size: .77rem; color: var(--text-muted); }
 .stat-value { font-size: 1.3rem; font-weight: 800; line-height: 1.2; letter-spacing: -.5px; }
+.stat-download { margin-inline-start: auto; padding: .4rem .5rem; font-size: .75rem; white-space: nowrap; }
+#export-status { margin-bottom: .6rem; }
+#export-status.is-error { color: var(--bad); }
+#export-progress { width: 100%; margin-bottom: .8rem; }
 
 .stat.all    { border-inline-start-color: var(--brand); }
 .stat.all .stat-ico { background: var(--brand-soft); color: var(--brand); }

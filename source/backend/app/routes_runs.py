@@ -2,17 +2,22 @@
 from __future__ import annotations
 
 import logging
+import shutil
 import tempfile
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
+from zipfile import ZIP_DEFLATED, ZipFile
 
 from fastapi import APIRouter, Body, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
+from starlette.background import BackgroundTask
 
 from . import runner, uploads
 from .extraction import list_resume_files
-from .models import ScreeningCriteria
+from .models import FinalStatus, RunState, ScreeningCriteria
+from .output_writer import _unique_name
+from .report import write_filtered_report
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -247,6 +252,50 @@ def report_name(run_id: str):
     return {"fileName": name}
 
 
+@router.get("/runs/{run_id}/export/{category}")
+def download_category(run_id: str, category: Literal["all", "approved", "rejected", "needs-review"]):
+    run = runner.get_run(run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="اجرای موردنظر یافت نشد.")
+    if run.state not in (RunState.FINISHED, RunState.CANCELLED):
+        raise HTTPException(status_code=409, detail="ابتدا بررسی رزومه‌ها را پایان دهید.")
+    status = {"all": None, "approved": FinalStatus.QUALIFIED,
+              "rejected": FinalStatus.NOT_QUALIFIED, "needs-review": FinalStatus.UNDETERMINED}[category]
+    results = [r for r in run.results if status is None or r.final_status == status]
+    if not results:
+        raise HTTPException(status_code=404, detail="در این دسته رزومه‌ای برای دانلود وجود ندارد.")
+    source_report = runner.report_path(run_id)
+    if source_report is None:
+        raise HTTPException(status_code=409, detail="گزارش Excel این اجرا در دسترس نیست.")
+    directory = Path(tempfile.mkdtemp(prefix="resume-check-export-"))
+    archive = directory / f"{category}-resumes.zip"
+    root = f"{category}-resumes"
+    names = {}
+    try:
+        with ZipFile(archive, "w", compression=ZIP_DEFLATED) as zip_file:
+            for result in results:
+                path = runner.resume_file_path(run_id, result.filename)
+                if path is None:
+                    raise HTTPException(status_code=409, detail=f"خروجی کامل ساخته نشد؛ فایل در دسترس نیست: {result.filename}")
+                name = _unique_name(uploads.safe_filename(result.filename.replace("/", "-").replace("\\", "-")), set(names.values()))
+                try:
+                    zip_file.write(path, f"{root}/resumes/{name}")
+                except OSError:
+                    raise HTTPException(status_code=409, detail=f"خروجی کامل ساخته نشد؛ خواندن فایل ناموفق بود: {result.filename}") from None
+                names[result.filename] = name
+            report = write_filtered_report(Path(source_report), run, names, directory)
+            zip_file.write(report, f"{root}/{category}-report.xlsx")
+        return FileResponse(archive, media_type="application/zip", filename=archive.name,
+                            background=BackgroundTask(shutil.rmtree, directory, ignore_errors=True))
+    except HTTPException:
+        shutil.rmtree(directory, ignore_errors=True)
+        raise
+    except Exception:
+        shutil.rmtree(directory, ignore_errors=True)
+        logger.exception("Category export failed for run %s", run_id)
+        raise HTTPException(status_code=500, detail="ساخت خروجی ZIP ناموفق بود؛ فضای دیسک و دسترسی به فایل‌ها را بررسی کنید.") from None
+
+
 # Content types served by the resume viewer. DOCX is an OOXML package, which browsers
 # cannot render, so it is offered as a download with an explanatory message.
 _MEDIA_TYPES = {
@@ -258,11 +307,32 @@ _MEDIA_TYPES = {
 @router.post("/runs/{run_id}/preview")
 def resume_preview(run_id: str, filename: str = Body(embed=True)):
     """Return PDF bytes to the internal renderer without a download filename."""
-    path = runner.resume_file_path(run_id, filename)
+    run = runner.get_run(run_id)
+    if run is None:
+        return JSONResponse({"code": "run_not_found", "detail": "این بررسی دیگر در دسترس نیست؛ رزومه‌ها را دوباره بررسی کنید."}, status_code=404)
+    if not any(result.filename == filename for result in run.results):
+        return JSONResponse({"code": "invalid_reference", "detail": "ارجاع رزومه نامعتبر است."}, status_code=400)
+    try:
+        path = runner.resume_file_path(run_id, filename)
+        if path is not None:
+            with open(path, "rb") as source:
+                header = source.read(1024)
+    except PermissionError:
+        logger.warning("PDF preview permission denied: run=%s", run_id, exc_info=True)
+        return JSONResponse({"code": "permission_denied", "detail": "اجازه خواندن این رزومه وجود ندارد. دسترسی به فایل را بررسی کنید."}, status_code=403)
+    except FileNotFoundError:
+        path = None
+    except (OSError, ValueError):
+        logger.warning("PDF preview file access failed: run=%s", run_id, exc_info=True)
+        return JSONResponse({"code": "file_access_failed", "detail": "خواندن فایل رزومه ناموفق بود؛ دسترسی و مسیر فایل را بررسی کنید."}, status_code=400)
     if path is None:
-        raise HTTPException(status_code=404, detail="فایل رزومه در دسترس نیست.")
+        return JSONResponse({"code": "file_not_found", "detail": "فایل این رزومه یافت نشد. ممکن است جابه‌جا یا حذف شده باشد."}, status_code=404)
     if Path(path).suffix.lower() != ".pdf":
         raise HTTPException(status_code=415, detail="پیش‌نمایش فقط برای PDF پشتیبانی می‌شود.")
+    if not header:
+        return JSONResponse({"code": "empty_pdf", "detail": "فایل PDF خالی است."}, status_code=422)
+    if b"%PDF-" not in header:
+        return JSONResponse({"code": "invalid_pdf", "detail": "فایل PDF نامعتبر یا خراب است."}, status_code=422)
     # PDF navigation/headers can activate browser viewers and download managers.
     return FileResponse(path, media_type="application/octet-stream", headers={
         "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff",

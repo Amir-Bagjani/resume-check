@@ -96,13 +96,6 @@
         <p id="keyword-hint" class="hint">اختیاری. حداقل یکی از دو معیار لازم است.</p>
       </div>
 
-      <!-- Output destination -->
-      <div class="field">
-        <label for="output-folder">مسیر ذخیره نتایج</label>
-        <input id="output-folder" type="text" dir="ltr" autocomplete="off" spellcheck="false"
-               placeholder="/Users/you/Desktop/resumes">
-        <p class="hint">پوشه‌ای که گزارش و رزومه‌های تأییدشده در آن ذخیره می‌شوند. اگر خالی بماند، نتایج را از همین صفحه دانلود کنید.</p>
-      </div>
     </article>
 
     <!-- Step 3: run -->
@@ -176,6 +169,7 @@
           <span class="stat-label">کل رزومه‌ها</span>
           <strong class="stat-value" id="s-found">۰</strong>
         </span>
+        <button type="button" class="btn ghost stat-download" data-export="all" aria-label="دانلود همه رزومه‌ها همراه گزارش Excel" disabled>دانلود ZIP</button>
       </div>
       <div class="stat ok">
         <span class="stat-ico" aria-hidden="true">
@@ -187,6 +181,7 @@
           <span class="stat-label">تأییدشده</span>
           <strong class="stat-value" id="s-qualified">۰</strong>
         </span>
+        <button type="button" class="btn ghost stat-download" data-export="approved" aria-label="دانلود رزومه‌های تأییدشده همراه گزارش Excel" disabled>دانلود ZIP</button>
       </div>
       <div class="stat bad">
         <span class="stat-ico" aria-hidden="true">
@@ -198,6 +193,7 @@
           <span class="stat-label">ردشده</span>
           <strong class="stat-value" id="s-not">۰</strong>
         </span>
+        <button type="button" class="btn ghost stat-download" data-export="rejected" aria-label="دانلود رزومه‌های ردشده همراه گزارش Excel" disabled>دانلود ZIP</button>
       </div>
       <div class="stat warn">
         <span class="stat-ico" aria-hidden="true">
@@ -210,8 +206,12 @@
           <span class="stat-label">نیازمند بررسی</span>
           <strong class="stat-value" id="s-und">۰</strong>
         </span>
+        <button type="button" class="btn ghost stat-download" data-export="needs-review" aria-label="دانلود رزومه‌های نیازمند بررسی همراه گزارش Excel" disabled>دانلود ZIP</button>
       </div>
     </div>
+
+    <p id="export-status" class="hint" role="status" aria-live="polite" hidden></p>
+    <progress id="export-progress" max="100" aria-label="پیشرفت دانلود ZIP" hidden></progress>
 
     <div class="card table-card">
       <div class="table-head">

@@ -12,6 +12,8 @@
   var lastFocused = null;
   var zoom = 1;
   var previewSession = null;
+  var exportReady = false;
+  var exporting = false;
 
   function $(id) {
     var el = document.getElementById(id);
@@ -101,8 +103,8 @@
           });
       }).catch(function (error) {
         if (previewSession !== session) return;
-        console.error("PDF viewer failed:", error);
-        showViewerError(0, "بارگذاری پیش‌نمایش PDF ناموفق بود.");
+        console.error("PDF preview [module/viewer initialization]:", error);
+        showViewerError(0, "بارگذاری نمایشگر PDF ناموفق بود. فایل‌های برنامه یا نوع محتوای آن‌ها را بررسی کنید؛ جزئیات در کنسول مرورگر ثبت شده است.");
       });
     } else {
       // Browsers cannot render DOCX; offer the file instead of a broken frame.
@@ -138,11 +140,11 @@
     var box = document.createElement("div");
     box.className = "viewer-error";
     box.setAttribute("role", "alert");
-    box.innerHTML =
-      '<p>' + (message || (status
-        ? "این رزومه در دسترس نیست."
-        : "ارتباط با سرور برقرار نشد.")) + '</p>' +
-      '<p style="font-weight:600;color:var(--text-soft)">فایل ممکن است حذف شده باشد یا دسترسی به آن ممکن نباشد.</p>';
+    var note = document.createElement("p");
+    note.textContent = message || (status === 404
+      ? "فایل این رزومه یافت نشد."
+      : "ارتباط با سرور برقرار نشد.");
+    box.appendChild(note);
     body.appendChild(box);
   }
 
@@ -172,6 +174,94 @@
   }
 
   /* -------------------------------------------------------------- table */
+
+  var CATEGORY_STATUS = { all: null, approved: "Qualified", rejected: "Not Qualified", "needs-review": "Undetermined" };
+
+  function updateExportButtons() {
+    document.querySelectorAll("[data-export]").forEach(function (button) {
+      var status = CATEGORY_STATUS[button.getAttribute("data-export")];
+      var count = rows.filter(function (row) { return status === null || row.finalStatus === status; }).length;
+      button.disabled = !exportReady || exporting || count === 0;
+      button.title = count ? "دانلود " + faNum(count) + " رزومه همراه گزارش Excel" : "در این دسته رزومه‌ای وجود ندارد.";
+    });
+  }
+
+  async function downloadCategory(category) {
+    if (!exportReady || exporting) return;
+    var id = runId;
+    var fileName = category + "-resumes.zip";
+    var status = $("export-status");
+    var progress = $("export-progress");
+    var writable = null;
+    var reader = null;
+    var controller = new AbortController();
+    exporting = true;
+    updateExportButtons();
+    status.hidden = false;
+    status.className = "hint";
+    status.textContent = "در حال آماده‌سازی ZIP شامل رزومه‌ها و گزارش Excel…";
+    progress.hidden = false;
+    progress.removeAttribute("value");
+    try {
+      // Open the native picker during the button gesture, before preparing the ZIP.
+      var handle = window.showSaveFilePicker ? await window.showSaveFilePicker({
+        suggestedName: fileName,
+        types: [{ description: "ZIP", accept: { "application/zip": [".zip"] } }],
+      }) : null;
+      var response = await fetch("/api/runs/" + encodeURIComponent(id) + "/export/" + category, { signal: controller.signal });
+      if (!response.ok) {
+        var error = await response.json().catch(function () { return {}; });
+        throw new Error(typeof error.detail === "string" ? error.detail : "ساخت خروجی ZIP ناموفق بود.");
+      }
+      if (handle) writable = await handle.createWritable();
+      reader = response.body.getReader();
+      var chunks = [];
+      var received = 0;
+      var total = Number(response.headers.get("Content-Length"));
+      while (true) {
+        var chunk = await reader.read();
+        if (chunk.done) break;
+        if (writable) await writable.write(chunk.value);
+        else chunks.push(chunk.value);
+        received += chunk.value.byteLength;
+        if (total) {
+          progress.value = Math.min(100, Math.round(received / total * 100));
+          status.textContent = "در حال دریافت ZIP… " + faNum(progress.value) + "٪";
+        }
+      }
+      if (total && received !== total) throw new Error("دریافت ZIP ناقص بود؛ دوباره تلاش کنید.");
+      if (writable) {
+        await writable.close();
+        writable = null;
+        status.textContent = "ZIP شامل رزومه‌ها و گزارش Excel ذخیره شد.";
+      } else {
+        var url = URL.createObjectURL(new Blob(chunks, { type: "application/zip" }));
+        var link = document.createElement("a");
+        link.href = url;
+        link.download = fileName;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(function () { URL.revokeObjectURL(url); }, 60000);
+        status.textContent = "ZIP آماده شد و به دانلودهای مرورگر ارسال شد.";
+      }
+    } catch (error) {
+      controller.abort();
+      if (writable) await writable.abort().catch(function () {});
+      if (error.name === "AbortError") status.textContent = "دانلود لغو شد.";
+      else {
+        status.className = "hint is-error";
+        status.textContent = error instanceof TypeError
+          ? "ارتباط با سرور برقرار نشد؛ اتصال را بررسی کنید و دوباره تلاش کنید."
+          : (error.message || "دانلود ZIP ناموفق بود؛ دوباره تلاش کنید.");
+      }
+    } finally {
+      if (reader) reader.releaseLock();
+      progress.hidden = true;
+      exporting = false;
+      updateExportButtons();
+    }
+  }
 
   function renderTable() {
     var body = $("results-body");
@@ -281,6 +371,8 @@
     text("results-date", d.screeningDateJalaliLong || d.screeningDateJalali || "—");
 
     var ready = (d.state === "finished" || d.state === "cancelled") && !!runId;
+    exportReady = ready;
+    updateExportButtons();
     if ($("download-report-btn")) $("download-report-btn").disabled = !ready;
 
     var err = $("results-error");
@@ -294,6 +386,9 @@
   }
 
   function init() {
+    document.querySelectorAll("[data-export]").forEach(function (button) {
+      button.addEventListener("click", function () { downloadCategory(button.getAttribute("data-export")); });
+    });
     document.querySelectorAll(".filter-chip, .chip").forEach(function (chip) {
       chip.addEventListener("click", function () {
         activeFilter = chip.getAttribute("data-filter");

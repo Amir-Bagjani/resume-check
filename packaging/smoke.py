@@ -4,6 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+from pathlib import Path
 import subprocess
 import sys
 import tempfile
@@ -70,6 +71,37 @@ def _docx_bytes(candidate: str, large: bool = False) -> bytes:
     return buf.getvalue()
 
 
+def _pdf_bytes(candidate: str) -> bytes:
+    from io import BytesIO
+    from reportlab.pdfgen import canvas
+
+    buf = BytesIO()
+    pdf = canvas.Canvas(buf)
+    for page in range(1, 4):
+        pdf.drawString(60, 740, f"{candidate} - page {page}")
+        pdf.drawString(60, 710, "Over 7 years of experience in software development. React Python Docker")
+        pdf.showPage()
+    pdf.save()
+    return buf.getvalue()
+
+
+def _check_pdf_assets(base: str) -> None:
+    frontend = Path(__file__).resolve().parents[1] / "source" / "frontend"
+    vendor = frontend / "vendor" / "pdfjs"
+    assets = [frontend / "js" / "pdf_preview.mjs"] + [p for p in vendor.rglob("*") if p.is_file()]
+    assert (vendor / "pdf.worker.min.mjs").is_file(), "PDF worker missing from build source"
+    for path in assets:
+        relative = path.relative_to(frontend).as_posix()
+        status, headers, data = _read(base, "/" + urllib.parse.quote(relative))
+        assert status == 200 and hashlib.sha256(data).digest() == hashlib.sha256(path.read_bytes()).digest(), relative
+        media = next((value for key, value in headers.items() if key.lower() == "content-type"), "").split(";", 1)[0]
+        if path.suffix == ".mjs":
+            assert media == "text/javascript", (relative, media)
+        elif path.suffix == ".wasm":
+            assert media == "application/wasm", (relative, media)
+    print(f"packaged PDF assets OK: {len(assets)} files, matching worker/modules, JavaScript/WASM MIME types", flush=True)
+
+
 def _instance_port(env: dict) -> int | None:
     if os.name == "nt":
         base = env.get("LOCALAPPDATA") or str(os.path.expanduser("~\\AppData\\Local"))
@@ -127,11 +159,14 @@ def main(exe: str) -> int:
         base = f"http://127.0.0.1:{port}"
         status, _, html = _read(base, "/")
         assert status == 200 and "غربالگری رزومه".encode() in html
+        _check_pdf_assets(base)
         fa_name = "رزومه فارسی.docx"
         names = [fa_name, f"تیم اول/{fa_name}", f"تیم دوم/{fa_name}",
                  "cv.docx", "CV.docx", "cv+.docx", "cv#.docx", "CON.docx",
-                 "AUX/رزومه.docx", "first/a-CV.docx", "FIRST-a/cv.docx", "large.docx"]
-        items = [(f"batch/{name}", _docx_bytes(f"Smoke Candidate {i}", large=name == "large.docx"))
+                 "AUX/رزومه.docx", "first/a-CV.docx", "FIRST-a/cv.docx", "large.docx",
+                 "رزومه فارسی چند صفحه.pdf", "Team Two/candidate with spaces.pdf"]
+        items = [(f"batch/{name}", _pdf_bytes(f"Smoke Candidate {i}") if name.endswith(".pdf")
+                  else _docx_bytes(f"Smoke Candidate {i}", large=name == "large.docx"))
                  for i, name in enumerate(names)]
         body, boundary = _multipart(items)
         req = urllib.request.Request(
@@ -167,6 +202,13 @@ def main(exe: str) -> int:
             fname = result["filename"]
             status, _, content = _read(base, f"/api/runs/{run_id}/resumes/{urllib.parse.quote(fname)}")
             assert status == 200, fname
+            if fname.endswith(".pdf"):
+                req = urllib.request.Request(f"{base}/api/runs/{run_id}/preview",
+                    data=json.dumps({"filename": fname}).encode(), headers={"Content-Type": "application/json"})
+                with _HTTP.open(req, timeout=30) as response:
+                    assert response.headers.get("Content-Type") == "application/octet-stream"
+                    assert response.headers.get("Content-Disposition") is None
+                    assert response.read() == content, "Preview bytes differ from stored PDF"
             viewed.append(hashlib.sha256(content).hexdigest())
         assert sorted(viewed) == sorted(hashlib.sha256(data).hexdigest() for _, data in items)
         status, _, xlsx = _read(base, f"/api/runs/{run_id}/report")

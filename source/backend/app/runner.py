@@ -135,14 +135,16 @@ def resume_file_path(run_id: str, filename: str) -> str | None:
         return None
 
     with _lock:
-        stored = _output_files.get(run_id, {}).get(requested)
+        stored_names = _output_files.get(run_id)
+        stored = stored_names.get(requested) if stored_names is not None else None
 
     # The output folder, searched by the exact written name first, then by plain
     # basename for runs finalized before the mapping was recorded.
     names: list[str] = []
     if stored:
         names.append(stored)
-    names.append(Path(requested).name)
+    if stored_names is None:
+        names.append(Path(requested).name)
     if run.output_path:
         out = Path(run.output_path).resolve()
         for name in dict.fromkeys(names):
