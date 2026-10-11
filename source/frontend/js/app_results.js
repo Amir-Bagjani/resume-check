@@ -11,6 +11,7 @@
   var scrollMemory = {};
   var lastFocused = null;
   var zoom = 1;
+  var previewSession = null;
 
   function $(id) {
     var el = document.getElementById(id);
@@ -48,6 +49,7 @@
   function openViewer(r) {
     var key = rowKey(r);
     if (!key) return;
+    releasePreview();
 
     scrollMemory[key] = window.scrollY;
     lastFocused = document.activeElement;
@@ -67,26 +69,41 @@
     dl.setAttribute("download", key);
     dl.setAttribute("title", "دانلود " + key);
 
-    // Zoom only applies to the embedded PDF frame.
+    // Zoom applies to PDF.js pages inside the existing dialog.
     $("viewer-zoom-in").hidden = !isPdf;
     $("viewer-zoom-out").hidden = !isPdf;
     $("viewer-zoom-label").hidden = !isPdf;
+    $("viewer-zoom-in").disabled = true;
+    $("viewer-zoom-out").disabled = true;
     zoom = 1;
     $("viewer-zoom-label").textContent = "۱۰۰٪";
 
     body.textContent = "";
     if (isPdf) {
-      var frame = document.createElement("iframe");
-      frame.id = "viewer-frame";
-      frame.src = src;
-      frame.title = "پیش‌نمایش رزومه " + key;
-      // The browser's own PDF plugin loads the file; if it cannot, the frame stays
-      // empty. A GET probe confirms reachability without relying on HEAD, which the
-      // API does not answer.
-      fetch(src).then(function (res) {
-        if (!res.ok) showViewerError(res.status);
-      }).catch(function () { showViewerError(0); });
-      body.appendChild(frame);
+      var loading = document.createElement("div");
+      loading.className = "viewer-loading";
+      loading.setAttribute("role", "status");
+      loading.textContent = "در حال بارگذاری پیش‌نمایش…";
+      body.appendChild(loading);
+      var session = { controller: new AbortController(), preview: null };
+      previewSession = session;
+      import("./pdf_preview.mjs").then(function (module) {
+        if (previewSession !== session) return;
+        session.preview = module.openPreview(body, runId, key, session.controller.signal,
+          function () {
+            if (previewSession !== session) return;
+            loading.remove();
+            $("viewer-zoom-in").disabled = false;
+            $("viewer-zoom-out").disabled = false;
+          },
+          function (status, message) {
+            if (previewSession === session) showViewerError(status, message);
+          });
+      }).catch(function (error) {
+        if (previewSession !== session) return;
+        console.error("PDF viewer failed:", error);
+        showViewerError(0, "بارگذاری پیش‌نمایش PDF ناموفق بود.");
+      });
     } else {
       // Browsers cannot render DOCX; offer the file instead of a broken frame.
       var box = document.createElement("div");
@@ -107,15 +124,24 @@
     $("viewer-close").focus();
   }
 
-  function showViewerError(status) {
+  function releasePreview() {
+    if (previewSession) previewSession.controller.abort();
+    previewSession = null;
+  }
+
+  function showViewerError(status, message) {
+    releasePreview();
+    $("viewer-zoom-in").disabled = true;
+    $("viewer-zoom-out").disabled = true;
     var body = $("viewer-body");
     body.textContent = "";
     var box = document.createElement("div");
     box.className = "viewer-error";
+    box.setAttribute("role", "alert");
     box.innerHTML =
-      '<p>' + (status
+      '<p>' + (message || (status
         ? "این رزومه در دسترس نیست."
-        : "ارتباط با سرور برقرار نشد.") + '</p>' +
+        : "ارتباط با سرور برقرار نشد.")) + '</p>' +
       '<p style="font-weight:600;color:var(--text-soft)">فایل ممکن است حذف شده باشد یا دسترسی به آن ممکن نباشد.</p>';
     body.appendChild(box);
   }
@@ -123,8 +149,7 @@
   function closeViewer() {
     var viewer = $("viewer");
     if (viewer.hidden) return;
-    var frame = $("viewer-frame");
-    if (frame) frame.src = "about:blank"; // release the PDF resource
+    releasePreview();
     $("viewer-body").textContent = "";
     viewer.hidden = true;
     document.body.style.overflow = "";
@@ -142,8 +167,7 @@
 
   function setZoom(delta) {
     zoom = Math.min(2, Math.max(0.5, Math.round((zoom + delta) * 10) / 10));
-    var frame = $("viewer-frame");
-    if (frame) frame.style.transform = "scale(" + zoom + ")";
+    if (previewSession && previewSession.preview) previewSession.preview.setZoom(zoom);
     $("viewer-zoom-label").textContent = faNum(Math.round(zoom * 100)) + "٪";
   }
 
@@ -374,7 +398,8 @@
       if (e.key === "Escape") closeViewer();
       if (e.key === "Tab" && !$("viewer").hidden) {
         // Keep focus inside the dialog.
-        var f = $("viewer").querySelectorAll("button, a[href]");
+        var f = Array.from($("viewer").querySelectorAll("button:not([disabled]), a[href], [tabindex='0']"))
+          .filter(function (el) { return !el.hidden; });
         if (!f.length) return;
         var first = f[0], last = f[f.length - 1];
         if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }

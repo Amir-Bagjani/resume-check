@@ -30,7 +30,8 @@ Both scripts create `.venv-pkg`, pin `pyinstaller==6.22.3` plus pinned
 ## CI build (no local Windows needed)
 
 Release builds via tag push (`v*`) or manual run: `.github/workflows/build.yml`
-builds on `windows-latest` / `macos-latest` / `ubuntu-latest`, runs a real
+builds on `windows-latest` / `macos-15-intel` (x86_64) / `macos-15` (arm64) /
+`ubuntu-latest`, runs a real
 backend/launcher test suite on each OS, then a headless smoke test of the produced
 binary (12 DOCX resumes, Persian names, subfolders, case/sanitization collisions,
 Windows reserved names, and a file over 1 MB → run → byte-identical downloads →
@@ -39,8 +40,17 @@ readable Persian Excel). An artifact is uploaded only after both checks pass:
 | Artifact | File |
 |---|---|
 | `resumecheck-Windows` | `ResumeCheck.exe` |
-| `resumecheck-macOS` | `ResumeCheck.app` |
+| `resumecheck-macOS-x64` | `ResumeCheck.app` (Intel) |
+| `resumecheck-macOS-arm64` | `ResumeCheck.app` (Apple Silicon) |
 | `resumecheck-Linux` | `ResumeCheck` |
+
+Each macOS job checks the runner and Python architecture before building. The
+shared PyInstaller spec targets the running Python architecture (`target_arch=None`)
+and validates native extension compatibility. CI checks the bundled executable with
+`file` and `lipo` before smoke testing and uploading, rejecting a mismatched build.
+Artifacts are downloaded from the Actions run; this workflow does not publish
+GitHub Release assets. Standard macOS ARM64 runners support public and private
+repositories, subject to the repository's Actions policies and available minutes.
 
 Manual trigger: repo → Actions → `build-standalone` → Run workflow.
 Tag release: `git tag v1.0.0 && git push origin v1.0.0`.
@@ -66,6 +76,14 @@ tree after checking the output.
 
 When updating, exit the old app first, then launch the newly built executable and
 use its browser URL. An existing instance otherwise keeps serving the old version.
+
+PDF resumes render inside the existing preview dialog using locally bundled
+PDF.js 6.3.289, including its worker, fonts and image decoders. This works offline
+and does not use the browser's native PDF handler. Preview bytes use a separate
+binary POST endpoint without PDF/download headers; explicit downloads still use
+the original download link. Scrolling, text selection and zoom stay in the dialog.
+Closing or switching previews aborts loading and releases the document worker.
+DOCX previews keep the existing download fallback.
 
 ## Upload troubleshooting (Windows)
 

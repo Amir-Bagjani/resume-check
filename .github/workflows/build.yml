@@ -14,9 +14,15 @@ jobs:
             exe: dist/ResumeCheck.exe
             artifact: resumecheck-Windows
             shell: pwsh
-          - os: macos-latest
+          - os: macos-15-intel
             exe: dist/ResumeCheck.app
-            artifact: resumecheck-macOS
+            artifact: resumecheck-macOS-x64
+            arch: x86_64
+            shell: bash
+          - os: macos-15
+            exe: dist/ResumeCheck.app
+            artifact: resumecheck-macOS-arm64
+            arch: arm64
             shell: bash
           - os: ubuntu-latest
             exe: dist/ResumeCheck
@@ -31,6 +37,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - name: Verify macOS build architecture
+        if: runner.os == 'macOS'
+        env:
+          EXPECTED_ARCH: ${{ matrix.arch }}
+        run: |
+          test "$(uname -m)" = "$EXPECTED_ARCH"
+          python -c "import os, platform; actual = platform.machine(); print('Python architecture:', actual); assert actual == os.environ['EXPECTED_ARCH'], actual"
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -51,6 +64,15 @@ jobs:
           python -m pip install -r source/backend/requirements.txt "pyinstaller==6.22.3"
           python -c "import shutil; [shutil.rmtree(d, ignore_errors=True) for d in ('build', 'dist')]"
           python -m PyInstaller --noconfirm packaging/resumecheck.spec
+      - name: Verify macOS binary architecture
+        if: runner.os == 'macOS'
+        env:
+          EXPECTED_ARCH: ${{ matrix.arch }}
+        run: |
+          binary="${{ matrix.exe }}/Contents/MacOS/ResumeCheck"
+          file "$binary"
+          lipo -info "$binary"
+          test "$(lipo -archs "$binary")" = "$EXPECTED_ARCH"
       - name: Smoke test (Windows)
         if: runner.os == 'Windows'
         run: |

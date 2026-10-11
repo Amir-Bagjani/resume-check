@@ -6,7 +6,7 @@ import tempfile
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, Body, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
@@ -253,6 +253,20 @@ _MEDIA_TYPES = {
     ".pdf": "application/pdf",
     ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
 }
+
+
+@router.post("/runs/{run_id}/preview")
+def resume_preview(run_id: str, filename: str = Body(embed=True)):
+    """Return PDF bytes to the internal renderer without a download filename."""
+    path = runner.resume_file_path(run_id, filename)
+    if path is None:
+        raise HTTPException(status_code=404, detail="فایل رزومه در دسترس نیست.")
+    if Path(path).suffix.lower() != ".pdf":
+        raise HTTPException(status_code=415, detail="پیش‌نمایش فقط برای PDF پشتیبانی می‌شود.")
+    # PDF navigation/headers can activate browser viewers and download managers.
+    return FileResponse(path, media_type="application/octet-stream", headers={
+        "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff",
+    })
 
 
 @router.get("/runs/{run_id}/resumes/{filename:path}")
