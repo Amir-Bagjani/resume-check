@@ -87,7 +87,9 @@ filter. Empty categories are disabled; missing or unreadable files cause a visib
 error instead of a partial archive. A browser Save dialog is used where supported;
 other browsers use their download settings. No destination path needs to be typed.
 
-Needs-review rows also offer **تأیید** and **رد**. A decision is saved atomically
+Every row and the preview header offer the two other statuses: **تأیید**, **رد**
+or **نیازمند بررسی**. Changing status in the preview keeps the document open.
+A decision is saved atomically
 to the existing Excel report before the table, counts and category exports update.
 The report keeps its screening dates, metadata and formatting. Close the workbook
 in Excel if Windows prevents it from being replaced. A browser refresh restores

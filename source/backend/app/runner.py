@@ -326,11 +326,12 @@ def review_resume(run_id: str, filename: str, status: FinalStatus) -> ScreeningR
         result = next((r for r in run.results if r.filename == filename), None)
         if result is None:
             raise KeyError("رزومه موردنظر یافت نشد.")
-        if status not in (FinalStatus.QUALIFIED, FinalStatus.NOT_QUALIFIED):
+        if status not in (FinalStatus.QUALIFIED, FinalStatus.NOT_QUALIFIED, FinalStatus.UNDETERMINED):
             raise ValueError("تصمیم بررسی نامعتبر است.")
-        if result.final_status != FinalStatus.UNDETERMINED:
-            raise ValueError("فقط رزومه‌های نیازمند بررسی را می‌توان تأیید یا رد کرد.")
-        decision = "تأیید دستی" if status == FinalStatus.QUALIFIED else "رد دستی"
+        if result.final_status == status:
+            raise ValueError("رزومه از قبل همین وضعیت را دارد.")
+        decision = {FinalStatus.QUALIFIED: "تأیید دستی", FinalStatus.NOT_QUALIFIED: "رد دستی",
+                    FinalStatus.UNDETERMINED: "نیازمند بررسی دستی"}[status]
         reviewed = replace(result, final_status=status, reason=decision + (" — " + result.reason if result.reason else ""))
         results = [reviewed if r is result else r for r in run.results]
         updated = replace(run, results=results,

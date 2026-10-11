@@ -34,7 +34,7 @@ class StartRunRequest(BaseModel):
 
 class ReviewRequest(BaseModel):
     filename: str
-    decision: Literal["approved", "rejected"]
+    decision: Literal["approved", "rejected", "needs-review"]
 
 
 def _resolve_folder(folder_path: str) -> Path:
@@ -101,7 +101,8 @@ def get_run(run_id: str):
 
 @router.post("/runs/{run_id}/review")
 def review_resume(run_id: str, body: ReviewRequest):
-    status = FinalStatus.QUALIFIED if body.decision == "approved" else FinalStatus.NOT_QUALIFIED
+    status = {"approved": FinalStatus.QUALIFIED, "rejected": FinalStatus.NOT_QUALIFIED,
+              "needs-review": FinalStatus.UNDETERMINED}[body.decision]
     try:
         run = runner.review_resume(run_id, body.filename, status)
     except KeyError:

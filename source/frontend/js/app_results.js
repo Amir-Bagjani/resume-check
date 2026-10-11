@@ -15,6 +15,7 @@
   var exportReady = false;
   var exporting = false;
   var reviewPending = null;
+  var viewerKey = null;
 
   function $(id) {
     var el = document.getElementById(id);
@@ -60,6 +61,8 @@
     var viewer = $("viewer");
     var body = $("viewer-body");
     var isPdf = /\.pdf$/i.test(key);
+    viewerKey = key;
+    $("viewer-review-error").hidden = true;
 
     $("viewer-title").textContent = r.candidateName || key;
     var badge = $("viewer-badge");
@@ -123,6 +126,7 @@
     }
 
     viewer.hidden = false;
+    renderViewerReview();
     document.body.style.overflow = "hidden";
     $("viewer-close").focus();
   }
@@ -155,6 +159,7 @@
     releasePreview();
     $("viewer-body").textContent = "";
     viewer.hidden = true;
+    viewerKey = null;
     document.body.style.overflow = "";
     if (lastFocused && lastFocused.focus) lastFocused.focus();
     var key = null;
@@ -177,6 +182,39 @@
   /* -------------------------------------------------------------- table */
 
   var CATEGORY_STATUS = { all: null, approved: "Qualified", rejected: "Not Qualified", "needs-review": "Undetermined" };
+  var REVIEW_LABELS = { approved: "تأیید", rejected: "رد", "needs-review": "نیازمند بررسی" };
+
+  function createReviewActions(row) {
+    var actions = document.createElement("div");
+    actions.className = "review-actions";
+    Object.keys(REVIEW_LABELS).forEach(function (decision) {
+      if (CATEGORY_STATUS[decision] === row.finalStatus) return;
+      var action = document.createElement("button");
+      action.type = "button";
+      action.className = "view-btn";
+      action.setAttribute("data-review", decision);
+      action.textContent = reviewPending && reviewPending.filename === rowKey(row) && reviewPending.decision === decision
+        ? "در حال ذخیره…" : REVIEW_LABELS[decision];
+      action.setAttribute("aria-label", REVIEW_LABELS[decision] + " رزومه " + (row.candidateName || rowKey(row)));
+      action.disabled = !exportReady || exporting || !!reviewPending;
+      action.addEventListener("click", function () { reviewResume(row, decision); });
+      actions.appendChild(action);
+    });
+    return actions;
+  }
+
+  function renderViewerReview() {
+    if (!viewerKey) return;
+    var row = rows.find(function (r) { return rowKey(r) === viewerKey; });
+    if (!row) return;
+    var actions = $("viewer-review-actions");
+    var focused = actions.contains(document.activeElement);
+    actions.replaceChildren(createReviewActions(row));
+    var badge = $("viewer-badge");
+    badge.textContent = row.finalStatusFa || STATUS_FA[row.finalStatus];
+    badge.className = "badge " + STATUS_CLS[row.finalStatus];
+    if (focused) $("viewer-close").focus();
+  }
 
   function updateExportButtons() {
     document.querySelectorAll("[data-export]").forEach(function (button) {
@@ -197,7 +235,9 @@
     var id = runId;
     reviewPending = { filename: rowKey(row), decision: decision };
     $("results-error").hidden = true;
+    $("viewer-review-error").hidden = true;
     renderTable();
+    renderViewerReview();
     updateExportButtons();
     try {
       var response = await fetch("/api/runs/" + encodeURIComponent(id) + "/review", {
@@ -214,10 +254,15 @@
           ? "ارتباط با سرور برقرار نشد؛ تصمیم تأیید نشده است. دوباره تلاش کنید."
           : (error.message || "ذخیره تصمیم ناموفق بود.");
         message.hidden = false;
+        if (viewerKey === rowKey(row)) {
+          $("viewer-review-error").textContent = message.textContent;
+          $("viewer-review-error").hidden = false;
+        }
       }
     } finally {
       reviewPending = null;
       renderTable();
+      renderViewerReview();
       updateExportButtons();
     }
   }
@@ -379,24 +424,7 @@
         '<circle cx="12" cy="12" r="2.6"/></svg><span>مشاهده رزومه</span>';
       btn.addEventListener("click", function () { openViewer(r); });
       act.appendChild(btn);
-      if (r.finalStatus === "Undetermined") {
-        var actions = document.createElement("div");
-        actions.className = "review-actions";
-        ["approved", "rejected"].forEach(function (decision) {
-          var action = document.createElement("button");
-          action.type = "button";
-          action.className = "view-btn";
-          action.setAttribute("data-review", decision);
-          var label = decision === "approved" ? "تأیید" : "رد";
-          action.textContent = reviewPending && reviewPending.filename === key && reviewPending.decision === decision
-            ? "در حال ذخیره…" : label;
-          action.setAttribute("aria-label", label + " رزومه " + (r.candidateName || key));
-          action.disabled = !exportReady || exporting || !!reviewPending;
-          action.addEventListener("click", function () { reviewResume(r, decision); });
-          actions.appendChild(action);
-        });
-        act.appendChild(actions);
-      }
+      act.appendChild(createReviewActions(r));
       tr.appendChild(act);
 
       body.appendChild(tr);
@@ -410,6 +438,7 @@
   }
 
   function show(d) {
+    if (viewerKey && d.runId !== runId) closeViewer();
     rows = d.results || [];
     runId = d.runId || null;
     try { sessionStorage.setItem("resumecheck-run", runId || ""); } catch (_) {}
@@ -436,7 +465,8 @@
     }
 
     renderTable();
-    $("results-heading").focus();
+    renderViewerReview();
+    if (!viewerKey) $("results-heading").focus();
   }
 
   function init() {
