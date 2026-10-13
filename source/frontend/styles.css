@@ -425,9 +425,10 @@ p { margin: 0; text-wrap: pretty; }
   font-size: .82rem; font-weight: 700; color: var(--text-muted);
   text-align: center; font-variant-numeric: tabular-nums;
 }
-/* Fixed widths for everything but the reason: it absorbs the remaining space,
-   so narrowing the name column widens the reason column. */
-.c-name { width: 148px; }
+/* Fixed widths for every column but the reason: it absorbs whatever is left,
+   so narrowing the candidate column widens the reason column. */
+.c-name { width: 116px; }
+/* The reason column is the flexible one: whatever the other columns leave. */
 .c-reason { width: auto; }
 .c-years { width: 96px; }
 .c-status { width: 104px; }
