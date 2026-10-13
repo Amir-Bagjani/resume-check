@@ -157,6 +157,9 @@ test("row actions stack the resume buttons above a full-width decision control",
   const row = app.el("results-body").children[0];
   assert.equal(row.children[0].className, "c-index");
   assert.equal(row.children[0].textContent, "1", "rows are numbered from one");
+  // Every fixed-width column needs its class, or table-layout: fixed ignores it.
+  assert.deepEqual(row.children.map(node => node.className),
+                   ["c-index", "c-name", "c-years", "c-status", "c-reason", "c-act"]);
   const cell = row.children.find(node => node.className === "c-act");
   assert.ok(cell, "the operations cell exists");
   const actions = cell.children[0];

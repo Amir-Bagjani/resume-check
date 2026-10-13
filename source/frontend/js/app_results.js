@@ -391,6 +391,7 @@
 
       // Candidate
       var name = document.createElement("td");
+      name.className = "c-name";
       var wrap = document.createElement("div");
       wrap.className = "cell-name";
       var strong = document.createElement("strong");
@@ -423,6 +424,7 @@
 
       // Status badge
       var status = document.createElement("td");
+      status.className = "c-status";
       var badge = document.createElement("span");
       badge.className = "badge " + (STATUS_CLS[r.finalStatus] || "warn");
       badge.textContent = r.finalStatusFa || STATUS_FA[r.finalStatus] || "—";

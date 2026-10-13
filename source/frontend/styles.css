@@ -427,11 +427,11 @@ p { margin: 0; text-wrap: pretty; }
 }
 /* Fixed widths for every column but the reason: it absorbs whatever is left,
    so narrowing the candidate column widens the reason column. */
-.c-name { width: 116px; }
+.c-name { width: 104px; }
 /* The reason column is the flexible one: whatever the other columns leave. */
 .c-reason { width: auto; }
 .c-years { width: 96px; }
-.c-status { width: 104px; }
+.c-status { width: 96px; }
 /* Operations: the two resume actions on top, the decision control below, all
    the same width so the cell reads as one tidy block. */
 .c-act { width: 244px; }
@@ -459,7 +459,7 @@ p { margin: 0; text-wrap: pretty; }
 .cell-name span {
   font-size: .75rem; color: var(--text-muted);
   direction: ltr; text-align: right; unicode-bidi: isolate;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 150px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 96px;
 }
 
 .years-val { font-weight: 800; font-size: .9rem; }
