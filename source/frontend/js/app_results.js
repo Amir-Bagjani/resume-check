@@ -33,13 +33,20 @@
   var STATUS_FA = { Qualified: "تأییدشده", "Not Qualified": "ردشده", Undetermined: "نیازمند بررسی" };
   var STATUS_CLS = { Qualified: "ok", "Not Qualified": "bad", Undetermined: "warn" };
 
+  function validJobinjaUrl(value) {
+    try {
+      var url = new URL(value);
+      return url.protocol === "https:" && !url.username && !url.password && (!url.port || url.port === "443") &&
+        (url.hostname === "jobinja.ir" || url.hostname.endsWith(".jobinja.ir"));
+    } catch (_) { return false; }
+  }
+
   function criteriaSummary(d) {
     var parts = [];
     var c = d.criteria || {};
     if (c.minYears !== null && c.minYears !== undefined && c.minYears !== "") {
       parts.push("حداقل " + faNum(c.minYears) + " سال");
     }
-    if (c.keywords && c.keywords.length) parts.push(c.keywords.join("، "));
     return parts.join(" · ") || d.criteriaUsedFa || "—";
   }
 
@@ -183,6 +190,8 @@
 
   var CATEGORY_STATUS = { all: null, approved: "Qualified", rejected: "Not Qualified", "needs-review": "Undetermined" };
   var REVIEW_LABELS = { approved: "تأیید", rejected: "رد", "needs-review": "نیازمند بررسی" };
+  // The decision buttons borrow the status column colours so the two agree.
+  var REVIEW_CLS = { approved: "ok", rejected: "bad", "needs-review": "warn" };
 
   function createReviewActions(row) {
     var actions = document.createElement("div");
@@ -191,7 +200,7 @@
       if (CATEGORY_STATUS[decision] === row.finalStatus) return;
       var action = document.createElement("button");
       action.type = "button";
-      action.className = "view-btn";
+      action.className = "view-btn review-btn " + REVIEW_CLS[decision];
       action.setAttribute("data-review", decision);
       action.textContent = reviewPending && reviewPending.filename === rowKey(row) && reviewPending.decision === decision
         ? "در حال ذخیره…" : REVIEW_LABELS[decision];
@@ -275,6 +284,7 @@
     var progress = $("export-progress");
     var writable = null;
     var reader = null;
+    var failureLocation = "picker";
     var controller = new AbortController();
     exporting = true;
     updateExportButtons();
@@ -289,19 +299,23 @@
         suggestedName: fileName,
         types: [{ description: "ZIP", accept: { "application/zip": [".zip"] } }],
       }) : null;
+      failureLocation = "server";
       var response = await fetch("/api/runs/" + encodeURIComponent(id) + "/export/" + category, { signal: controller.signal });
       if (!response.ok) {
         var error = await response.json().catch(function () { return {}; });
         throw new Error(typeof error.detail === "string" ? error.detail : "ساخت خروجی ZIP ناموفق بود.");
       }
+      failureLocation = "disk";
       if (handle) writable = await handle.createWritable();
       reader = response.body.getReader();
       var chunks = [];
       var received = 0;
       var total = Number(response.headers.get("Content-Length"));
       while (true) {
+        failureLocation = "transfer";
         var chunk = await reader.read();
         if (chunk.done) break;
+        failureLocation = "disk";
         if (writable) await writable.write(chunk.value);
         else chunks.push(chunk.value);
         received += chunk.value.byteLength;
@@ -312,6 +326,7 @@
       }
       if (total && received !== total) throw new Error("دریافت ZIP ناقص بود؛ دوباره تلاش کنید.");
       if (writable) {
+        failureLocation = "disk";
         await writable.close();
         writable = null;
         status.textContent = "ZIP شامل رزومه‌ها و گزارش Excel ذخیره شد.";
@@ -327,12 +342,15 @@
         status.textContent = "ZIP آماده شد و به دانلودهای مرورگر ارسال شد.";
       }
     } catch (error) {
+      console.error("ZIP download failed", { location: failureLocation, error: error });
       controller.abort();
       if (writable) await writable.abort().catch(function () {});
       if (error.name === "AbortError") status.textContent = "دانلود لغو شد.";
       else {
         status.className = "hint is-error";
-        status.textContent = error instanceof TypeError
+        status.textContent = failureLocation === "disk" || failureLocation === "picker"
+          ? "ذخیره ZIP در مرورگر ناموفق بود؛ فضای دیسک و دسترسی به پوشه مقصد را بررسی کنید. " + (error.message || "")
+          : error instanceof TypeError
           ? "ارتباط با سرور برقرار نشد؛ اتصال را بررسی کنید و دوباره تلاش کنید."
           : (error.message || "دانلود ZIP ناموفق بود؛ دوباره تلاش کنید.");
       }
@@ -361,6 +379,13 @@
       var key = rowKey(r);
       var tr = document.createElement("tr");
       tr.setAttribute("data-row-key", key);
+
+      // Row number, counting the visible rows from one.
+      var index = document.createElement("td");
+      index.className = "c-index";
+      index.textContent = faNum(shown);
+      index.setAttribute("aria-label", "ردیف " + faNum(shown));
+      tr.appendChild(index);
 
       // Candidate
       var name = document.createElement("td");
@@ -412,19 +437,32 @@
       tr.appendChild(reason);
 
       // Actions — the view button exists for every row regardless of status.
+      // Two tidy rows: the file actions, then the review decisions.
       var act = document.createElement("td");
       act.className = "c-act";
+      var stack = document.createElement("div");
+      stack.className = "act-stack";
+      var fileRow = document.createElement("div");
+      fileRow.className = "act-row";
       var btn = document.createElement("button");
       btn.type = "button";
       btn.className = "view-btn";
       btn.setAttribute("aria-label", "مشاهده رزومه " + (r.candidateName || key));
-      btn.innerHTML =
-        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" ' +
-        'stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7z"/>' +
-        '<circle cx="12" cy="12" r="2.6"/></svg><span>مشاهده رزومه</span>';
+      btn.textContent = "مشاهده رزومه";
       btn.addEventListener("click", function () { openViewer(r); });
-      act.appendChild(btn);
-      act.appendChild(createReviewActions(r));
+      fileRow.appendChild(btn);
+      if (r.jobinjaUrl && validJobinjaUrl(r.jobinjaUrl)) {
+        var jobinjaLink = document.createElement("a");
+        jobinjaLink.className = "view-btn jobinja-link";
+        jobinjaLink.textContent = "جابینجا";
+        jobinjaLink.href = r.jobinjaUrl;
+        jobinjaLink.target = "_blank";
+        jobinjaLink.rel = "noopener noreferrer";
+        fileRow.appendChild(jobinjaLink);
+      }
+      stack.appendChild(fileRow);
+      stack.appendChild(createReviewActions(r));
+      act.appendChild(stack);
       tr.appendChild(act);
 
       body.appendChild(tr);
@@ -466,6 +504,24 @@
 
     renderTable();
     renderViewerReview();
+    var failures = $("download-failures");
+    failures.textContent = "";
+    failures.hidden = !(d.downloadFailures && d.downloadFailures.length);
+    if (!failures.hidden) {
+      var title = document.createElement("strong");
+      title.textContent = faNum(d.downloadFailures.length) + " رزومه دریافت نشد؛ این موارد ارزیابی نشده‌اند.";
+      failures.appendChild(title);
+      var details = document.createElement("details");
+      var summary = document.createElement("summary");
+      summary.textContent = "جزئیات خطاها و گزارش دریافت";
+      details.appendChild(summary);
+      d.downloadFailures.forEach(function (failure) {
+        var item = document.createElement("p");
+        item.textContent = (failure.candidateName || "متقاضی ردیف " + faNum(failure.excelRow)) + " — " + failure.reason;
+        details.appendChild(item);
+      });
+      failures.appendChild(details);
+    }
     if (!viewerKey) $("results-heading").focus();
   }
 

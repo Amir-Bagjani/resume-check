@@ -22,6 +22,7 @@ RUN_STATE_FA = {
     "paused": "متوقف",
     "cancelled": "لغو شده",
     "finished": "پایان‌یافته",
+    "failed": "ناموفق",
 }
 
 DETECTION_STATUS_FA = {

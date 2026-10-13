@@ -6,11 +6,13 @@ upload: that directory is temporary and is swept once the session is over.
 """
 from __future__ import annotations
 
+import logging
 import shutil
 from datetime import date
 from pathlib import Path
 
 REPORT_FILENAME = "screening-report.xlsx"
+logger = logging.getLogger(__name__)
 
 
 def jalali_today_str(today: date | None = None) -> str:
@@ -68,12 +70,15 @@ def copy_resumes(source_folder: str, output_dir: Path, filenames: list[str]) -> 
     taken: set[str] = set()
     for name in filenames:
         src = source / name
-        safe_flat = name.replace("/", "-")
+        safe_flat = name.replace("\\", "-").replace("/", "-")
         target_name = _unique_name(safe_flat, taken)
         try:
             shutil.copy2(src, output_dir / target_name)
         except OSError:
+            logger.exception("Resume copy failed: source=%s destination=%s", src, output_dir / target_name)
             continue
         taken.add(target_name)
         written.append((name, target_name))
+    logger.info("Resume copies: expected=%d copied=%d missing=%d source=%s output=%s",
+                len(filenames), len(written), len(filenames) - len(written), source, output_dir)
     return written

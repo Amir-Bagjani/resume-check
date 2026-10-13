@@ -1,6 +1,7 @@
 """Chunked run orchestrator: in-memory registry, chunks of 10, pause/cancel."""
 from __future__ import annotations
 
+import logging
 import tempfile
 import threading
 import time
@@ -18,12 +19,14 @@ from .locale import (
     jalali_display_date_long,
     run_state_fa,
 )
-from .models import FinalStatus, ScreeningCriteria, ScreeningRun, RunState
+from .models import Applicant, FinalStatus, ScreeningCriteria, ScreeningRun, RunState
 from .output_writer import REPORT_FILENAME, copy_resumes, make_output_dir
+from .paths import user_data_dir
 from .qualification import evaluate
 from .report import criteria_text, save_review_report, write_report
 
 CHUNK_SIZE = 10
+logger = logging.getLogger(__name__)
 
 _runs: dict[str, ScreeningRun] = {}
 _queues: dict[str, list[str]] = {}
@@ -56,11 +59,13 @@ def set_output_target(upload_id: str, target: str | None) -> None:
 
 
 def _output_parent(upload_id: str | None) -> Path | None:
-    """Folder the run should write into, or None to keep results server-side."""
+    """Writable, durable destination for uploads, or None for local-folder runs."""
     if not upload_id:
         return None
     with _lock:
-        return _output_targets.get(upload_id)
+        target = _output_targets.get(upload_id)
+    # Keep durable copies outside staging: the upload TTL sweep deletes its entire tree.
+    return target if target is not None else user_data_dir() / "outputs"
 
 
 def register_upload(directory: Path) -> None:
@@ -118,6 +123,37 @@ def qualified_file_path(run_id: str, filename: str) -> str | None:
     except ValueError:
         return None
     return str(target) if target.is_file() else None
+
+
+def source_label(run: ScreeningRun) -> str:
+    """Which intake produced this run: the Jobinja Excel flow or a picked folder."""
+    return "jobinja" if run.applicants else "folder"
+
+
+def describe_missing_resume(run_id: str, filename: str) -> str:
+    """Why a run's resume cannot be served. Persian text only, never a path."""
+    run = get_run(run_id)
+    if run is None:
+        return "این بررسی دیگر در دسترس نیست؛ رزومه‌ها را دوباره بررسی کنید."
+    requested = str(filename or "").strip()
+    with _lock:
+        stored_names = _output_files.get(run_id)
+    stored = stored_names.get(requested) if stored_names is not None else None
+    output_exists = bool(run.output_path) and Path(run.output_path).is_dir()
+    staged_exists = Path(run.folder_path).is_dir()
+    logger.warning("Resume not served: run=%s source=%s file=%s output_dir=%s stored=%s staged=%s",
+                   run_id, source_label(run), requested, output_exists, stored is not None, staged_exists)
+    if not run.output_path:
+        return ("پوشهٔ خروجی این اجرا ساخته نشده است؛ تولید گزارش کامل نشده و نتایج ذخیره‌شده در دسترس نیستند.")
+    if not output_exists:
+        return "پوشهٔ خروجی این اجرا پیدا نشد؛ خروجی‌های قبلی جابه‌جا یا حذف شده‌اند."
+    if stored_names is not None and stored is None:
+        return "این فایل برای این اجرا ثبت نشده است؛ فهرست رزومه‌های دریافت‌شده را بررسی کنید."
+    if stored and not (Path(run.output_path) / stored).is_file():
+        return "نسخهٔ ذخیره‌شدهٔ این رزومه در پوشهٔ خروجی نیست؛ خروجی این اجرا ناقص است."
+    if not staged_exists:
+        return "فایل موقت این رزومه پاک شده و نسخهٔ ذخیره‌شده در دسترس نیست."
+    return "فایل این رزومه در هیچ‌کدام از مسیرهای این اجرا پیدا نشد."
 
 
 def resume_file_path(run_id: str, filename: str) -> str | None:
@@ -183,6 +219,9 @@ def _process_chunk(run_id: str) -> None:
         except Exception:
             from .models import ResumeFacts
             result = evaluate(ResumeFacts(filename=filename), run.criteria, unreadable=True)
+        applicant = next((a for a in run.applicants if a.filename == filename), None)
+        if applicant is not None and applicant.name:
+            result.candidate_name = applicant.name
         with _lock:
             run.results.append(result)
             run.processed += 1
@@ -212,13 +251,22 @@ def _process_chunk(run_id: str) -> None:
 
 
 def _finalize(run: ScreeningRun) -> None:
-    if run.processed == 0:
-        run.output_path = None
-        run.state = RunState.FINISHED
+    try:
+        _write_output(run)
+    except Exception:
+        # The run must leave RUNNING, otherwise the UI polls a finished job forever.
+        logger.exception("Run output could not be written: run=%s folder=%s", run.run_id, run.folder_path)
+        run.state = RunState.FAILED
+        run.error = "تولید گزارش یا پوشهٔ خروجی ناموفق بود؛ نتایج بررسی‌شده در گزارش ثبت نشد. جزئیات کامل در لاگ برنامه است."
         return
-    # Results go into the folder the user chose for this upload, exactly like the
-    # original local-path flow. With no destination chosen they stay next to the
-    # staged files so the UI can download them.
+    run.state = RunState.FINISHED
+
+
+def _write_output(run: ScreeningRun) -> None:
+    if run.processed == 0 and not run.applicants:
+        run.output_path = None
+        return
+    # Browser uploads use the selected destination or writable user data storage.
     uploaded = _is_uploaded_run(run)
     target = _output_parent(_upload_id_for(run.folder_path)) if uploaded else None
     parent = target if target is not None else Path(run.folder_path)
@@ -235,7 +283,6 @@ def _finalize(run: ScreeningRun) -> None:
     missing = len(processed) - len(pairs)
     write_report(run, out, copied_count=len(pairs), missing_count=missing)
     run.output_path = str(out)
-    run.state = RunState.FINISHED
 
 
 def _record_output_files(run: ScreeningRun, mapping: dict[str, str]) -> None:
@@ -296,14 +343,16 @@ def sweep_stale_uploads(max_age_seconds: int = 6 * 3600) -> int:
     return removed
 
 
-def create_run(folder_path: str, criteria: ScreeningCriteria) -> ScreeningRun:
+def create_run(folder_path: str, criteria: ScreeningCriteria, applicants: list[Applicant] | None = None) -> ScreeningRun:
     folder_path = str(folder_path)
     name = Path(folder_path).name
     with _lock:
         is_upload = any(d.name == name for d in _uploads.values())
-    files = list_resume_files(folder_path, recursive=is_upload)
+    files = ([a.filename for a in applicants if a.download_status == "downloaded"]
+             if applicants else list_resume_files(folder_path, recursive=is_upload))
     run_id = uuid.uuid4().hex[:12]
-    run = ScreeningRun(run_id=run_id, folder_path=folder_path, criteria=criteria, found=len(files))
+    run = ScreeningRun(run_id=run_id, folder_path=folder_path, criteria=criteria, found=len(files),
+                       applicants=applicants or [])
     with _lock:
         _runs[run_id] = run
         _queues[run_id] = files
@@ -387,18 +436,21 @@ def cancel_run(run_id: str) -> bool:
                 write_report(run, out, copied_count=len(written))
                 run.output_path = str(out)
             except Exception:
-                pass
+                logger.exception("Cancelled run output could not be saved: run=%s source=%s destination=%s",
+                                 run.run_id, run.folder_path, target)
+                run.error = "پوشهٔ خروجی برای رزومه‌های لغوشده ذخیره نشد؛ جزئیات کامل در لاگ برنامه است."
     # The staged copies stay as a fallback, but the output folder now holds every
     # processed resume, so the viewer no longer depends on them.
     return True
 
 
 def run_to_dict(run: ScreeningRun) -> dict:
+    applicants = {a.filename: a for a in run.applicants if a.filename}
     return {
         "runId": run.run_id,
         "state": run.state.value,
         "folderPath": run.folder_path,
-        "criteria": {"minYears": run.criteria.min_years, "keywords": run.criteria.keywords},
+        "criteria": {"minYears": run.criteria.min_years},
         "criteriaUsed": _criteria_text(run.criteria),
         "found": run.found,
         "processed": run.processed,
@@ -407,22 +459,24 @@ def run_to_dict(run: ScreeningRun) -> dict:
         "not_qualified": run.not_qualified,
         "undetermined": run.undetermined,
         "outputPath": run.output_path,
+        "error": run.error,
         "reportName": REPORT_FILENAME,
         "results": [
             {
                 "filename": r.filename,
                 "candidateName": r.candidate_name,
+                "jobinjaUrl": applicants[r.filename].jobinja_url if r.filename in applicants else None,
+                "applicantId": applicants[r.filename].applicant_id if r.filename in applicants else None,
+                "excelRow": applicants[r.filename].excel_row if r.filename in applicants else None,
                 "declaredExperienceYears": r.declared_experience_years,
                 "experienceSourceText": r.experience_source_text,
                 "experienceSourceSection": r.experience_source_section,
                 "experienceDetectionStatus": r.experience_detection_status.value,
                 "experienceDetectionStatusFa": detection_status_fa(r.experience_detection_status.value),
+                "skillsDetected": r.skills_detected,
                 "experienceStatus": r.experience_status.value,
                 "experienceStatusFa": experience_status_fa(r.experience_status.value),
                 "declaredExperienceYearsFa": format_years(r.declared_experience_years),
-                "skillsDetected": r.skills_detected,
-                "requiredFound": r.required_found,
-                "requiredMissing": r.required_missing,
                 "finalStatus": r.final_status.value,
                 "finalStatusFa": final_status_fa(r.final_status.value),
                 "reason": r.reason,
@@ -433,6 +487,12 @@ def run_to_dict(run: ScreeningRun) -> dict:
         "screeningDateJalali": jalali_display_date(),
         "screeningDateJalaliLong": jalali_display_date_long(),
         "criteriaUsedFa": criteria_text(run.criteria),
+        "source": "jobinja" if run.applicants else "folder",
+        "downloadFailures": [
+            {"applicantId": a.applicant_id, "excelRow": a.excel_row,
+             "candidateName": a.name, "downloadStatus": a.download_status, "reason": a.download_error}
+            for a in run.applicants if a.download_status != "downloaded"
+        ],
     }
 
 
@@ -440,6 +500,4 @@ def _criteria_text(c: ScreeningCriteria) -> str:
     parts = []
     if c.min_years is not None:
         parts.append(f"حداقل {format_years(c.min_years)}")
-    if c.keywords:
-        parts.append("فناوری‌ها: " + "، ".join(c.keywords))
     return " · ".join(parts) or "(هیچ)"

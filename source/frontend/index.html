@@ -6,7 +6,7 @@
 <title>غربالگری رزومه</title>
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="vendor/pdfjs/pdf_viewer.css">
-<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="styles.css?v=jobinja-ui-2">
 </head>
 <body>
 
@@ -23,22 +23,37 @@
       </div>
       <div>
         <h1 id="setup-heading">غربالگری رزومه</h1>
-        <p>پوشه رزومه‌ها را انتخاب کنید، معیارها را مشخص کنید و نتیجه را همان‌جا ببینید.</p>
+        <p>از پوشه یا جابینجا شروع کنید؛ سابقهٔ اعلام‌شده را سریع و دقیق بررسی کنید.</p>
       </div>
     </header>
 
-    <!-- Step 1: folder -->
+    <div class="setup-grid">
+    <!-- Step 1: source -->
     <article class="card step" aria-labelledby="step-folder">
       <div class="step-head">
         <span class="step-num">۱</span>
-        <h2 id="step-folder">انتخاب پوشه رزومه‌ها</h2>
+        <h2 id="step-folder">رزومه‌ها از کجا بیایند؟</h2>
       </div>
+
+      <fieldset class="source-options">
+        <legend class="sr-only">روش دریافت رزومه‌ها</legend>
+        <label class="source-option">
+          <input id="source-folder" type="radio" name="resume-source" value="folder" checked>
+          <span><strong>انتخاب پوشه رزومه‌ها</strong><small>PDF و DOCX روی رایانه</small></span>
+        </label>
+        <label class="source-option">
+          <input id="source-jobinja" type="radio" name="resume-source" value="jobinja">
+          <span><strong>بارگذاری اکسل جابینجا</strong><small>دریافت فایل از لینک متقاضیان</small></span>
+        </label>
+      </fieldset>
+
+      <div id="folder-panel">
 
       <input id="folder-input" type="file" webkitdirectory directory multiple
              accept=".pdf,.docx"
-             class="sr-only" aria-describedby="folder-help">
+             class="sr-only">
 
-      <button id="folder-btn" type="button" class="dropzone" aria-describedby="folder-help">
+      <button id="folder-btn" type="button" class="dropzone">
         <span class="dz-icon" aria-hidden="true">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
             <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
@@ -47,6 +62,19 @@
         <span class="dz-title" id="dz-title">انتخاب پوشه رزومه‌ها</span>
         <span class="dz-sub">فایل‌های PDF و DOCX داخل پوشه بررسی می‌شوند</span>
       </button>
+
+      </div>
+      <div id="jobinja-panel" hidden>
+        <input id="excel-input" type="file" accept=".xlsx" class="sr-only" aria-label="فایل اکسل جابینجا">
+        <button id="excel-btn" type="button" class="dropzone" aria-describedby="excel-help">
+          <span class="dz-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zM14 2v6h6M8 12h8M8 16h8M12 12v8"/></svg>
+          </span>
+          <span class="dz-title">انتخاب فایل اکسل جابینجا</span>
+          <span class="dz-sub">شیت اول · لینک‌های اصلی رزومه‌ها · XLSX</span>
+        </button>
+        <p id="excel-help" class="hint">با شروع بررسی، رزومه‌ها از لینک‌های داخل Excel دریافت می‌شوند.</p>
+      </div>
 
       <p id="folder-status" class="inline-status" role="status" aria-live="polite"></p>
 
@@ -62,45 +90,33 @@
             <span id="picked-count" class="picked-count"></span>
           </span>
         </div>
-        <button id="folder-reset-btn" type="button" class="btn ghost sm">تغییر پوشه</button>
+        <button id="folder-reset-btn" type="button" class="btn ghost sm">پاک کردن انتخاب</button>
       </div>
 
-      <p id="folder-help" class="hint">فقط فایل‌های PDF و DOCX خوانده می‌شوند؛ فایل‌های اصلی شما تغییری نمی‌کنند.</p>
     </article>
 
     <!-- Step 2: criteria -->
     <article class="card step" aria-labelledby="step-criteria">
       <div class="step-head">
         <span class="step-num">۲</span>
-        <h2 id="step-criteria">معیارهای بررسی</h2>
+        <h2 id="step-criteria">حداقل سابقهٔ موردنیاز</h2>
       </div>
 
       <div class="field">
         <label for="min-years">حداقل سابقه کار اعلام‌شده</label>
         <div class="input-wrap">
           <input id="min-years" type="number" min="0" max="60" step="1" inputmode="numeric"
-                 placeholder="۵" aria-describedby="min-years-hint">
+                 placeholder="۵" required>
           <span class="unit">سال</span>
         </div>
-        <p id="min-years-hint" class="hint">فقط عددی که داوطلب در رزومه نوشته مقایسه می‌شود.</p>
-      </div>
-
-      <div class="field">
-        <label for="keyword-input">فناوری‌های موردنیاز</label>
-        <div class="input-wrap">
-          <input id="keyword-input" type="text" autocomplete="off" spellcheck="false"
-                 placeholder="مثلاً React" aria-describedby="keyword-hint">
-          <button id="keyword-add-btn" type="button" class="btn ghost">افزودن</button>
-        </div>
-        <ul id="keyword-chips" class="chips" aria-label="فناوری‌های موردنیاز"></ul>
-        <p id="keyword-hint" class="hint">اختیاری. حداقل یکی از دو معیار لازم است.</p>
       </div>
 
     </article>
+    </div>
 
     <!-- Step 3: run -->
     <div class="run-bar">
-      <p id="start-hint" class="run-hint">برای شروع، پوشه را انتخاب کنید و حداقل یک معیار تعیین کنید.</p>
+      <p id="start-hint" class="run-hint">منبع رزومه‌ها و حداقل سابقه کار را مشخص کنید.</p>
       <button id="start-btn" type="button" class="btn primary lg" disabled>
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
           <path d="m5 3 14 9-14 9z"/>
@@ -135,6 +151,7 @@
       <div class="progress-actions">
         <button id="pause-btn" type="button" class="btn ghost">توقف موقت</button>
         <button id="cancel-btn" type="button" class="btn ghost danger">لغو</button>
+        <button id="progress-back-btn" type="button" class="btn ghost" hidden>انتخاب منبع دیگر</button>
       </div>
       <p id="progress-error" class="alert" role="alert" hidden></p>
     </div>
@@ -157,6 +174,7 @@
         <button id="new-run-btn" type="button" class="btn ghost">بررسی جدید</button>
       </div>
     </header>
+    <div id="download-failures" class="alert" role="status" hidden></div>
 
     <div class="stats" id="summary-cards">
       <div class="stat all">
@@ -236,6 +254,7 @@
         <table id="results-table">
           <thead>
             <tr>
+              <th scope="col" class="c-index">ردیف</th>
               <th scope="col">متقاضی</th>
               <th scope="col" class="c-years">سابقه اعلام‌شده</th>
               <th scope="col" class="c-status">وضعیت</th>
@@ -291,8 +310,8 @@
   </div>
 </div>
 
-<script src="js/app_setup.js"></script>
-<script src="js/app_progress.js"></script>
-<script src="js/app_results.js"></script>
+<script src="js/app_setup.js?v=jobinja-ui-2"></script>
+<script src="js/app_progress.js?v=jobinja-ui-2"></script>
+<script src="js/app_results.js?v=jobinja-ui-2"></script>
 </body>
 </html>

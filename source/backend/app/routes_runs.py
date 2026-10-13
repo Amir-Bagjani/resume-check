@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import logging
+import math
 import shutil
+import sys
 import tempfile
 from pathlib import Path
 from typing import Literal, Optional
@@ -13,7 +15,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 from starlette.background import BackgroundTask
 
-from . import runner, uploads
+from . import jobinja, runner, uploads
 from .extraction import list_resume_files
 from .models import FinalStatus, RunState, ScreeningCriteria
 from .output_writer import _unique_name
@@ -48,23 +50,16 @@ def _resolve_folder(folder_path: str) -> Path:
 
 def _parse_criteria(raw: dict) -> ScreeningCriteria:
     min_years = raw.get("minYears", raw.get("min_years"))
-    keywords = raw.get("keywords", []) or []
     if min_years is not None:
         try:
             min_years = float(min_years)
         except (TypeError, ValueError):
             raise HTTPException(status_code=400, detail="مقدار حداقل سابقه باید عدد باشد.")
-        if min_years < 0:
+        if not math.isfinite(min_years) or min_years < 0:
             raise HTTPException(status_code=400, detail="مقدار حداقل سابقه نمی‌تواند منفی باشد.")
-    keywords = [k.strip() for k in keywords if isinstance(k, str) and k.strip()]
-    seen, deduped = set(), []
-    for k in keywords:
-        if k.lower() not in seen:
-            seen.add(k.lower())
-            deduped.append(k)
-    if min_years is None and not deduped:
-        raise HTTPException(status_code=400, detail="حداقل یک معیار غربال لازم است.")
-    return ScreeningCriteria(min_years=min_years, keywords=deduped)
+    if min_years is None:
+        raise HTTPException(status_code=400, detail="حداقل سابقه کار الزامی است.")
+    return ScreeningCriteria(min_years=min_years)
 
 
 @router.post("/folders/scan")
@@ -234,6 +229,59 @@ class StartUploadRunRequest(BaseModel):
     outputFolder: Optional[str] = None
 
 
+@router.post("/jobinja/imports")
+async def create_jobinja_import(file: UploadFile = File(...)):
+    if Path(file.filename or "").suffix.lower() != ".xlsx":
+        raise HTTPException(status_code=400, detail="فایل Excel جابینجا با پسوند XLSX انتخاب کنید.")
+    data = await file.read(jobinja.MAX_EXCEL_BYTES + 1)
+    try:
+        applicants = jobinja.parse_excel(data)
+        directory = uploads.new_upload_dir(Path(tempfile.gettempdir()) / "resume-check-uploads")
+    except jobinja.JobinjaError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    except OSError:
+        raise HTTPException(status_code=507, detail="فضای کاری دریافت رزومه‌ها قابل نوشتن نیست؛ فضای دیسک و دسترسی را بررسی کنید.") from None
+    job = jobinja.ImportJob(directory.name, directory, uploads.safe_filename(file.filename), applicants)
+    jobinja._imports[job.import_id] = job
+    return jobinja.import_state(job)
+
+
+def _jobinja_import(import_id: str) -> jobinja.ImportJob:
+    job = jobinja._imports.get(import_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="فایل Excel بارگذاری‌شده یافت نشد؛ دوباره آن را انتخاب کنید.")
+    return job
+
+
+@router.get("/jobinja/imports/{import_id}")
+def get_jobinja_import(import_id: str):
+    return jobinja.import_state(_jobinja_import(import_id))
+
+
+@router.post("/jobinja/imports/{import_id}/run")
+def start_jobinja_import(import_id: str, body: StartUploadRunRequest):
+    job = _jobinja_import(import_id)
+    criteria = _parse_criteria(body.criteria)
+    try:
+        jobinja.start_import(job, criteria, body.outputFolder)
+    except jobinja.JobinjaError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from None
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from None
+    return jobinja.import_state(job)
+
+
+@router.post("/jobinja/imports/{import_id}/cancel")
+def cancel_jobinja_import(import_id: str):
+    job = _jobinja_import(import_id)
+    with job.lock:
+        job.cancelled = True
+        run_id = job.run_id
+    if run_id is not None:
+        runner.cancel_run(run_id)
+    return jobinja.import_state(job)
+
+
 @router.post("/uploads/{upload_id}/run")
 def start_upload_run(upload_id: str, body: StartUploadRunRequest):
     """Start a screening run over a staged upload."""
@@ -288,34 +336,90 @@ def download_category(run_id: str, category: Literal["all", "approved", "rejecte
         raise HTTPException(status_code=404, detail="در این دسته رزومه‌ای برای دانلود وجود ندارد.")
     source_report = runner.report_path(run_id)
     if source_report is None:
-        raise HTTPException(status_code=409, detail="گزارش Excel این اجرا در دسترس نیست.")
-    directory = Path(tempfile.mkdtemp(prefix="resume-check-export-"))
-    archive = directory / f"{category}-resumes.zip"
+        logger.error("ZIP has no report: run=%s source=%s processed=%d expected=%d output_exists=%s",
+                     run_id, runner.source_label(run), run.processed, len(results),
+                     bool(run.output_path) and Path(run.output_path).is_dir())
+        raise HTTPException(
+            status_code=409,
+            detail="گزارش Excel این اجرا ساخته نشده است؛ نتایج ذخیره نشده‌اند. بررسی را دوباره اجرا کنید.")
     root = f"{category}-resumes"
     names = {}
+    directory = None
+    found = added = missing = 0
     try:
+        logger.info("ZIP start: run=%s category=%s processed=%d expected=%d frozen=%s platform=%s "
+                    "source=%s output=%s temp=%s cwd=%s bundle=%s",
+                    run_id, category, run.processed, len(results), bool(getattr(sys, "frozen", False)),
+                    sys.platform, Path(run.folder_path).resolve(), run.output_path, tempfile.gettempdir(),
+                    Path.cwd(), getattr(sys, "_MEIPASS", None))
+        if (category == "all" and len(results) != run.processed) or len({r.filename for r in results}) != len(results):
+            logger.error("ZIP references do not match the run: run=%s source=%s category=%s processed=%d expected=%d",
+                         run_id, runner.source_label(run), category, run.processed, len(results))
+            raise HTTPException(status_code=409, detail="فهرست رزومه‌های این اجرا کامل نیست؛ بررسی را دوباره اجرا کنید.")
+        files = []
+        for result in results:
+            path = runner.resume_file_path(run_id, result.filename)
+            if path is None:
+                missing += 1
+                logger.error("ZIP source missing: run=%s filename=%s source=%s output=%s stored=%s",
+                             run_id, result.filename, run.folder_path, run.output_path,
+                             runner._output_files.get(run_id, {}).get(result.filename))
+            else:
+                found += 1
+                logger.info("ZIP source resolved: run=%s filename=%s path=%s", run_id, result.filename, path)
+                files.append((result.filename, path))
+        if missing:
+            logger.error("ZIP is incomplete: run=%s source=%s category=%s expected=%d found=%d missing=%d",
+                         run_id, runner.source_label(run), category, len(results), found, missing)
+            raise HTTPException(status_code=409, detail=f"خروجی کامل ساخته نشد؛ {missing} فایل رزومه در پوشهٔ خروجی این اجرا نیست.")
+        directory = Path(tempfile.mkdtemp(prefix="resume-check-export-"))
+        archive = directory / f"{category}-resumes.zip"
+        logger.info("ZIP destination: run=%s archive=%s", run_id, archive)
         with ZipFile(archive, "w", compression=ZIP_DEFLATED) as zip_file:
-            for result in results:
-                path = runner.resume_file_path(run_id, result.filename)
-                if path is None:
-                    raise HTTPException(status_code=409, detail=f"خروجی کامل ساخته نشد؛ فایل در دسترس نیست: {result.filename}")
-                name = _unique_name(uploads.safe_filename(result.filename.replace("/", "-").replace("\\", "-")), set(names.values()))
-                try:
-                    zip_file.write(path, f"{root}/resumes/{name}")
-                except OSError:
-                    raise HTTPException(status_code=409, detail=f"خروجی کامل ساخته نشد؛ خواندن فایل ناموفق بود: {result.filename}") from None
-                names[result.filename] = name
+            for filename, path in files:
+                name = _unique_name(uploads.safe_filename(filename.replace("/", "-").replace("\\", "-")), set(names.values()))
+                zip_file.write(path, f"{root}/resumes/{name}")
+                names[filename] = name
+                added += 1
             report = write_filtered_report(Path(source_report), run, names, directory)
             zip_file.write(report, f"{root}/{category}-report.xlsx")
+        with ZipFile(archive, "r") as zip_file:
+            expected = {f"{root}/resumes/{name}" for name in names.values()} | {f"{root}/{category}-report.xlsx"}
+            if added != len(results) or len(zip_file.infolist()) != len(results) + 1 or set(zip_file.namelist()) != expected:
+                raise ValueError("ZIP entries do not match expected resumes and report")
+            corrupt = zip_file.testzip()
+            if corrupt is not None:
+                raise ValueError(f"ZIP CRC validation failed: {corrupt}")
+        logger.info("ZIP validated: run=%s expected=%d found=%d added=%d missing=%d size=%d archive=%s",
+                    run_id, len(results), found, added, missing, archive.stat().st_size, archive)
         return FileResponse(archive, media_type="application/zip", filename=archive.name,
+                            headers={"Cache-Control": "no-store"},
                             background=BackgroundTask(shutil.rmtree, directory, ignore_errors=True))
     except HTTPException:
-        shutil.rmtree(directory, ignore_errors=True)
+        logger.warning("ZIP refused: run=%s source=%s category=%s expected=%d found=%d added=%d missing=%d",
+                       run_id, runner.source_label(run), category, len(results), found, added, missing)
+        if directory is not None:
+            shutil.rmtree(directory, ignore_errors=True)
         raise
+    except OSError:
+        if directory is not None:
+            shutil.rmtree(directory, ignore_errors=True)
+        logger.exception("ZIP could not be written: run=%s source=%s category=%s expected=%d found=%d added=%d",
+                         run_id, runner.source_label(run), category, len(results), found, added)
+        raise HTTPException(status_code=500, detail="نوشتن فایل خروجی ممکن نشد؛ فضای دیسک و دسترسی نوشتن را بررسی کنید.") from None
+    except ValueError:
+        # The archive or its report did not match the run results.
+        if directory is not None:
+            shutil.rmtree(directory, ignore_errors=True)
+        logger.exception("ZIP content did not match the run: run=%s source=%s category=%s expected=%d found=%d added=%d",
+                         run_id, runner.source_label(run), category, len(results), found, added)
+        raise HTTPException(status_code=500, detail="محتوای خروجی با نتایج این اجرا مطابقت نداشت؛ دوباره تلاش کنید.") from None
     except Exception:
-        shutil.rmtree(directory, ignore_errors=True)
-        logger.exception("Category export failed for run %s", run_id)
-        raise HTTPException(status_code=500, detail="ساخت خروجی ZIP ناموفق بود؛ فضای دیسک و دسترسی به فایل‌ها را بررسی کنید.") from None
+        if directory is not None:
+            shutil.rmtree(directory, ignore_errors=True)
+        logger.exception("ZIP failed: run=%s source=%s category=%s expected=%d found=%d added=%d missing=%d",
+                         run_id, runner.source_label(run), category, len(results), found, added, missing)
+        raise HTTPException(status_code=500, detail="ساخت خروجی ZIP ناموفق بود؛ خطای غیرمنتظره در لاگ برنامه ثبت شد.") from None
 
 
 # Content types served by the resume viewer. DOCX is an OOXML package, which browsers
@@ -348,7 +452,9 @@ def resume_preview(run_id: str, filename: str = Body(embed=True)):
         logger.warning("PDF preview file access failed: run=%s", run_id, exc_info=True)
         return JSONResponse({"code": "file_access_failed", "detail": "خواندن فایل رزومه ناموفق بود؛ دسترسی و مسیر فایل را بررسی کنید."}, status_code=400)
     if path is None:
-        return JSONResponse({"code": "file_not_found", "detail": "فایل این رزومه یافت نشد. ممکن است جابه‌جا یا حذف شده باشد."}, status_code=404)
+        return JSONResponse({"code": "file_not_found",
+                             "detail": runner.describe_missing_resume(run_id, filename)},
+                            status_code=404)
     if Path(path).suffix.lower() != ".pdf":
         raise HTTPException(status_code=415, detail="پیش‌نمایش فقط برای PDF پشتیبانی می‌شود.")
     if not header:
@@ -365,12 +471,13 @@ def resume_preview(run_id: str, filename: str = Body(embed=True)):
 def resume_file(run_id: str, filename: str, download: bool = False):
     """Serve one processed resume for the in-app viewer or as a download.
 
-    Works for every status: qualified resumes are copied into the output folder,
-    the rest stay in the staged upload. Both are reachable only through the run id.
+    Every status uses the durable output copy, with staged input as a fallback.
+    Both are reachable only through the run id.
     """
     path = runner.resume_file_path(run_id, filename)
     if path is None:
-        raise HTTPException(status_code=404, detail="فایل رزومه در دسترس نیست.")
+        detail = runner.describe_missing_resume(run_id, filename)
+        raise HTTPException(status_code=404, detail=detail)
     file_path = Path(path)
     media = _MEDIA_TYPES.get(file_path.suffix.lower(), "application/octet-stream")
     if download:

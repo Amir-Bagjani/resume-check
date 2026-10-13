@@ -19,7 +19,8 @@
     uploadId: null,
     uploading: false,
     starting: false,
-    keywords: [],
+    source: "folder",
+    importId: null,
     minYears: null,
     runId: null,
   };
@@ -39,19 +40,21 @@
   }
 
   function hasCriterion() {
-    return state.keywords.length > 0 || (state.minYears !== null && state.minYears !== "");
+    return state.minYears !== null && Number.isFinite(state.minYears) && state.minYears >= 0;
   }
   function folderReady() { return state.fileCount > 0 && !state.uploading && !state.starting; }
 
   function refreshStart() {
     var ready = folderReady() && hasCriterion();
     $("start-btn").disabled = !ready;
-    $("folder-btn").disabled = state.uploading || state.starting;
+    ["folder-btn", "excel-btn", "source-folder", "source-jobinja"].forEach(function (id) {
+      $(id).disabled = state.uploading || state.starting;
+    });
     $("start-hint").textContent = ready
       ? "همه‌چیز آماده است — " + faNum(state.fileCount) + " فایل برای بررسی."
       : state.uploading
         ? "در حال بارگذاری فایل‌ها…"
-        : "برای شروع، پوشه را انتخاب کنید و حداقل یک معیار تعیین کنید.";
+        : "منبع رزومه‌ها و حداقل سابقه کار را مشخص کنید.";
   }
 
   function setStatus(text, isError) {
@@ -68,7 +71,7 @@
     $("picked-name").textContent = state.folderName || "—";
     $("picked-count").textContent =
       faNum(state.fileCount) + " فایل" +
-      (state.skipped ? " · " + faNum(state.skipped) + " فایل نادیده گرفته شد" : "");
+      (state.skipped ? " · " + faNum(state.skipped) + (state.source === "jobinja" ? " ردیف نامعتبر" : " فایل نادیده گرفته شد") : "");
     $("dz-title").textContent = state.folderName || "انتخاب پوشه رزومه‌ها";
     $("folder-btn").classList.add("is-done");
   }
@@ -78,6 +81,7 @@
     state.fileCount = 0;
     state.skipped = 0;
     state.uploadId = null;
+    state.importId = null;
     state.uploading = false;
     $("folder-summary").hidden = true;
     $("folder-btn").classList.remove("is-done");
@@ -159,38 +163,42 @@
       });
   }
 
-  /* ------------------------------------------------------------ keywords */
-  function renderChips() {
-    var ul = $("keyword-chips");
-    ul.textContent = "";
-    state.keywords.forEach(function (kw) {
-      var li = document.createElement("li");
-      li.appendChild(document.createTextNode(kw));
-      var b = document.createElement("button");
-      b.type = "button";
-      b.textContent = "✕";
-      b.setAttribute("aria-label", "حذف " + kw);
-      b.addEventListener("click", function () {
-        state.keywords = state.keywords.filter(function (k) { return k !== kw; });
-        renderChips();
-        refreshStart();
-      });
-      li.appendChild(b);
-      ul.appendChild(li);
-    });
-    refreshStart();
+  function changeSource(source) {
+    if (state.uploading || state.starting) return;
+    state.source = source;
+    clearFolder();
+    $("folder-panel").hidden = source !== "folder";
+    $("jobinja-panel").hidden = source !== "jobinja";
+    showError("");
   }
 
-  function addKeyword() {
-    var input = $("keyword-input");
-    var v = input.value.trim();
-    if (!v) return;
-    var dup = state.keywords.some(function (k) { return k.toLowerCase() === v.toLowerCase(); });
-    if (dup) { input.value = ""; input.focus(); return; }
-    state.keywords.push(v);
-    input.value = "";
-    input.focus();
-    renderChips();
+  async function uploadExcel(file) {
+    clearFolder();
+    showError("");
+    if (!file || !/\.xlsx$/i.test(file.name)) { showError("فایل Excel با پسوند XLSX انتخاب کنید."); return; }
+    if (file.size > 10 * 1024 * 1024) { showError("حجم Excel باید حداکثر ۱۰ مگابایت باشد."); return; }
+    state.uploading = true;
+    refreshStart();
+    setStatus("در حال خواندن ردیف‌های Excel…");
+    var form = new FormData();
+    form.append("file", file, file.name);
+    try {
+      var response = await fetch("/api/jobinja/imports", { method: "POST", body: form });
+      var data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "خواندن Excel ناموفق بود.");
+      state.importId = data.importId;
+      state.folderName = data.folderName || file.name;
+      state.fileCount = data.total;
+      state.skipped = data.failed;
+      renderSummary();
+      setStatus(data.failed ? faNum(data.failed) + " ردیف لینک معتبر ندارد؛ در گزارش دریافت مشخص می‌شود." : "");
+    } catch (error) {
+      showError(error instanceof TypeError ? "ارتباط با ResumeCheck برقرار نشد؛ برنامه را باز نگه دارید." : error.message);
+      setStatus("خواندن Excel ناموفق بود.", true);
+    } finally {
+      state.uploading = false;
+      refreshStart();
+    }
   }
 
   /* ----------------------------------------------------------------- run */
@@ -198,19 +206,21 @@
     // Guards against double submission while uploading or already running.
     if (state.starting) return;
     showError("");
-    if (!folderReady()) { showError("ابتدا یک پوشه حاوی رزومه انتخاب کنید."); return; }
-    if (!hasCriterion()) { showError("حداقل یک معیار تعیین کنید: سابقه کار یا فناوری موردنیاز."); return; }
+    if (!folderReady()) { showError("ابتدا پوشه رزومه‌ها یا Excel جابینجا را انتخاب کنید."); return; }
+    if (!hasCriterion()) { showError("حداقل سابقه کار را با یک عدد نامنفی مشخص کنید."); return; }
 
     var criteria = {
       minYears: state.minYears === null || state.minYears === "" ? null : state.minYears,
-      keywords: state.keywords.slice(),
     };
 
     state.starting = true;
     refreshStart();
     $("start-btn").disabled = true;
 
-    fetch("/api/uploads/" + encodeURIComponent(state.uploadId) + "/run", {
+    var endpoint = state.source === "jobinja"
+      ? "/api/jobinja/imports/" + encodeURIComponent(state.importId) + "/run"
+      : "/api/uploads/" + encodeURIComponent(state.uploadId) + "/run";
+    fetch(endpoint, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ criteria: criteria }),
@@ -223,7 +233,8 @@
       })
       .then(function (data) {
         state.runId = data.runId;
-        window.App.progress.begin(data.runId, state.folderName, criteria);
+        if (state.source === "jobinja") window.App.progress.beginImport(state.importId, state.folderName, criteria);
+        else window.App.progress.begin(data.runId, state.folderName, criteria);
       })
       .catch(function (err) {
         state.starting = false;
@@ -237,7 +248,7 @@
     $("screen-results").hidden = true;
     $("screen-setup").hidden = false;
     state.starting = false;
-    if (!keep) clearFolder();
+    if (!keep || state.source === "jobinja") clearFolder();
     refreshStart();
     showError("");
   }
@@ -253,9 +264,15 @@
       if (e.target.files && e.target.files.length) upload(e.target.files);
     });
 
-    $("keyword-add-btn").addEventListener("click", addKeyword);
-    $("keyword-input").addEventListener("keydown", function (e) {
-      if (e.key === "Enter") { e.preventDefault(); addKeyword(); }
+    ["source-folder", "source-jobinja"].forEach(function (id) {
+      $(id).addEventListener("change", function (event) { changeSource(event.target.value); });
+    });
+    $("excel-btn").addEventListener("click", function () {
+      $("excel-input").value = "";
+      $("excel-input").click();
+    });
+    $("excel-input").addEventListener("change", function (event) {
+      if (event.target.files && event.target.files.length) uploadExcel(event.target.files[0]);
     });
     $("min-years").addEventListener("input", function (e) {
       var v = e.target.value;
@@ -263,7 +280,6 @@
       refreshStart();
     });
     $("start-btn").addEventListener("click", start);
-    renderChips();
     refreshStart();
   }
 

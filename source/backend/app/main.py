@@ -33,7 +33,10 @@ async def loopback_guard(request: Request, call_next):
             o = origin.lower()
             if not (o.startswith("http://127.0.0.1") or o.startswith("http://localhost")):
                 return JSONResponse(status_code=403, content={"detail": "دسترسی مجاز نیست."})
-    return await call_next(request)
+    response = await call_next(request)
+    if not request.url.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-cache"
+    return response
 
 
 _frontend = frontend_dir()

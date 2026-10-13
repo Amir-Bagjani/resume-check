@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import multiprocessing
 import os
 import signal
@@ -173,10 +174,18 @@ def _start_server(sock: socket.socket, port: int):
     with open(_log_file(), "a", encoding="utf-8") as lf:
         sys.stdout = lf
         sys.stderr = lf
+        backend_logger = logging.getLogger("backend")
+        handler = logging.StreamHandler(lf)
+        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
+        backend_logger.setLevel(logging.INFO)
+        backend_logger.addHandler(handler)
         config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="info")
         server = uvicorn.Server(config)
         _SERVER["obj"] = server
-        server.run(sockets=[sock])
+        try:
+            server.run(sockets=[sock])
+        finally:
+            backend_logger.removeHandler(handler)
 
 
 def _stop_own_server() -> None:

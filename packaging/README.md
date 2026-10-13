@@ -79,6 +79,14 @@ tree after checking the output.
 When updating, exit the old app first, then launch the newly built executable and
 use its browser URL. An existing instance otherwise keeps serving the old version.
 
+Jobinja imports do NOT need a browser: the site's JavaScript waiting page is
+solved inside the app, so no Chrome, Edge or Playwright is required or bundled.
+Playwright stays an optional fallback for a future template change — it is
+installed from `backend/requirements-dev.txt` for tests only, and the spec
+bundles it only when the build machine has it. With Playwright present the app
+can launch an isolated headless browser for that one applicant; browser binaries
+are never downloaded and personal profiles stay closed.
+
 Each results summary card has a ZIP download for all, approved, rejected or
 needs-review resumes, together with a matching Excel report. The saved report's
 metadata, screening dates and formatting are preserved, and counts reflect the

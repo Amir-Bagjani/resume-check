@@ -20,6 +20,7 @@ class RunState(str, Enum):
     PAUSED = "paused"
     CANCELLED = "cancelled"
     FINISHED = "finished"
+    FAILED = "failed"
 
 
 class DetectionStatus(str, Enum):
@@ -33,7 +34,17 @@ class DetectionStatus(str, Enum):
 @dataclass
 class ScreeningCriteria:
     min_years: Optional[float] = None
-    keywords: list[str] = field(default_factory=list)
+
+
+@dataclass
+class Applicant:
+    applicant_id: str
+    excel_row: int
+    name: str
+    jobinja_url: str = field(default="", repr=False)
+    filename: str = ""
+    download_status: str = "pending"
+    download_error: str = ""
 
 
 @dataclass
@@ -59,8 +70,6 @@ class ResumeResult:
     experience_detection_status: DetectionStatus = DetectionStatus.NOT_FOUND
     experience_status: ExperienceStatus = ExperienceStatus.UNKNOWN
     skills_detected: list[str] = field(default_factory=list)
-    required_found: list[str] = field(default_factory=list)
-    required_missing: list[str] = field(default_factory=list)
     final_status: FinalStatus = FinalStatus.UNDETERMINED
     reason: str = ""
 
@@ -77,4 +86,6 @@ class ScreeningRun:
     not_qualified: int = 0
     undetermined: int = 0
     output_path: Optional[str] = None
+    error: str = ""
     results: list[ResumeResult] = field(default_factory=list)
+    applicants: list[Applicant] = field(default_factory=list)

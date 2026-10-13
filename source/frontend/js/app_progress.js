@@ -3,6 +3,7 @@
   "use strict";
   var timer = null;
   var runId = null;
+  var importId = null;
 
   function $(id) { return document.getElementById(id); }
   function faNum(v) { return window.App.faNum(v); }
@@ -12,11 +13,13 @@
     if (c && c.minYears !== null && c.minYears !== undefined && c.minYears !== "") {
       parts.push("حداقل " + faNum(c.minYears) + " سال");
     }
-    if (c && c.keywords && c.keywords.length) parts.push(c.keywords.join("، "));
     return parts.join(" · ") || "—";
   }
 
   function render(d) {
+    $("progress-heading").textContent = "در حال بررسی رزومه‌ها";
+    $("progress-counters").hidden = false;
+    $("pause-btn").disabled = false;
     var found = d.found || 0;
     var done = d.processed || 0;
     var pct = found > 0 ? Math.round((done / found) * 100) : 0;
@@ -37,6 +40,24 @@
   }
 
   function poll() {
+    if (importId && !runId) {
+      fetch("/api/jobinja/imports/" + encodeURIComponent(importId))
+        .then(function (response) { if (!response.ok) throw new Error("دریافت وضعیت جابینجا ناموفق بود."); return response.json(); })
+        .then(function (data) {
+          if (data.runId) { runId = data.runId; importId = null; poll(); return; }
+          $("progress-heading").textContent = "در حال دریافت رزومه‌ها از جابینجا";
+          $("progress-counters").hidden = true;
+          $("pause-btn").disabled = true;
+          var percent = data.total ? Math.round(data.completed / data.total * 100) : 0;
+          $("progress-fill").style.width = percent + "%";
+          $("progress-fill").parentElement.setAttribute("aria-valuenow", String(percent));
+          $("progress-text").textContent = faNum(data.downloaded) + " رزومه از " + faNum(data.total) + " دریافت شد";
+          $("progress-current").textContent = data.failed ? faNum(data.failed) + " خطای دریافت؛ جزئیات در گزارش نهایی" : "";
+          if (data.state === "failed") { stop(); $("progress-back-btn").hidden = false; throw new Error(data.error || "دریافت رزومه‌ها ناموفق بود."); }
+        })
+        .catch(function (error) { $("progress-error").textContent = error.message; $("progress-error").hidden = false; });
+      return;
+    }
     fetch("/api/runs/" + encodeURIComponent(runId))
       .then(function (r) {
         if (!r.ok) throw new Error("بررسی وضعیت ناموفق بود.");
@@ -44,6 +65,14 @@
       })
       .then(function (d) {
         render(d);
+        if (d.state === "failed") {
+          stop();
+          var el = $("progress-error");
+          el.textContent = d.error || "تولید گزارش ناموفق بود؛ جزئیات کامل در لاگ برنامه است.";
+          el.hidden = false;
+          $("progress-back-btn").hidden = false;
+          return;
+        }
         if (d.state === "finished" || d.state === "cancelled") {
           stop();
           window.App.results.show(d);
@@ -58,11 +87,20 @@
 
   function stop() { if (timer) { clearInterval(timer); timer = null; } }
 
-  function begin(id, folderName, criteria) {
+  function begin(id, folderName, criteria, jobId) {
     runId = id;
+    importId = jobId || null;
     stop();
     var err = $("progress-error");
     err.hidden = true; err.textContent = "";
+    $("progress-back-btn").hidden = true;
+    $("pause-btn").disabled = !!importId;
+    $("progress-heading").textContent = importId ? "در حال دریافت رزومه‌ها از جابینجا" : "در حال بررسی رزومه‌ها";
+    $("progress-counters").hidden = !!importId;
+    $("progress-fill").style.width = "0%";
+    $("progress-fill").parentElement.setAttribute("aria-valuenow", "0");
+    $("progress-text").textContent = "در حال دریافت وضعیت…";
+    $("progress-current").textContent = "";
 
     $("screen-setup").hidden = true;
     $("screen-results").hidden = true;
@@ -84,9 +122,11 @@
   }
 
   function cancel() {
-    if (!runId) return;
-    if (!window.confirm("بررسی لغو شود؟ نتایج فایل‌های پردازش‌شده حفظ می‌شود.")) return;
-    fetch("/api/runs/" + encodeURIComponent(runId) + "/cancel", { method: "POST" })
+    if (!runId && !importId) return;
+    if (!window.confirm("دریافت یا بررسی لغو شود؟ فایل‌های دریافت‌شده و نتایج پردازش‌شده حفظ می‌شود.")) return;
+    var endpoint = runId ? "/api/runs/" + encodeURIComponent(runId) + "/cancel"
+      : "/api/jobinja/imports/" + encodeURIComponent(importId) + "/cancel";
+    fetch(endpoint, { method: "POST" })
       .then(poll)
       .catch(function () { /* the next poll will surface any real failure */ });
   }
@@ -94,10 +134,11 @@
   function init() {
     $("pause-btn").addEventListener("click", togglePause);
     $("cancel-btn").addEventListener("click", cancel);
+    $("progress-back-btn").addEventListener("click", function () { stop(); window.App.setup.resetToSetup(false); });
   }
 
   window.App = window.App || {};
-  window.App.progress = { begin: begin };
+  window.App.progress = { begin: begin, beginImport: function (id, label, criteria) { begin(null, label, criteria, id); } };
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
   else init();
 })();

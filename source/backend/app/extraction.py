@@ -1,4 +1,4 @@
-"""Resume text extractor and analyzer: PDF/DOCX extraction, declared-experience reader, keyword matcher."""
+"""Resume text extractor and analyzer: PDF/DOCX extraction, declared-experience reader."""
 from __future__ import annotations
 
 import os
@@ -28,7 +28,7 @@ KNOWN_SKILLS = [
     "Redux", "Next.js", "GraphQL", "REST", "Jenkins", "Terraform",
 ]
 
-# Common aliases normalized to canonical keyword form.
+# Aliases used by informational skill reporting.
 ALIASES = {
     "reactjs": "react",
     "react.js": "react",
@@ -50,13 +50,8 @@ def normalize(text: str) -> str:
     t = re.sub(r"[^a-z0-9\u0600-\u06ff+#. ]", " ", t)
     t = re.sub(r"\s+", " ", t).strip()
     # ponytail: trim leftover separators at both ends so "material-ui." still
-    # tokenizes as " material ui " and matches the "material ui" keyword.
+    # tokenizes as " material ui " for informational skill reporting.
     return t.strip("+#.")
-
-
-def normalize_keyword(kw: str) -> str:
-    n = normalize(kw)
-    return ALIASES.get(n, n)
 
 
 def extract_pdf_text(path: Path) -> str:
@@ -603,19 +598,6 @@ def detect_skills(text: str) -> list[str]:
             if skill not in found:
                 found.append(skill)
     return found
-
-
-def match_keywords(text: str, keywords: list[str]) -> tuple[list[str], list[str]]:
-    """Fuzzy case-insensitive match ignoring spacing/punctuation + aliases."""
-    norm = " " + normalize(text) + " "
-    found, missing = [], []
-    for kw in keywords:
-        n = normalize_keyword(kw)
-        hit = f" {n} " in norm or norm.startswith(n + " ") or norm.endswith(" " + n)
-        if not hit and len(n) <= 4:
-            hit = bool(re.search(rf"(?<![a-z0-9]){re.escape(n)}(?![a-z0-9])", norm))
-        (found if hit else missing).append(kw)
-    return found, missing
 
 
 def analyze_file(folder: str, filename: str) -> ResumeFacts:

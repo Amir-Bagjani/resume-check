@@ -1,5 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 """PyInstaller spec: one-file ResumeCheck (launcher + FastAPI + bundled UI)."""
+import importlib.util
 import os
 from pathlib import Path
 
@@ -11,7 +12,6 @@ ICON_ICNS = HERE / "assets" / "icon.icns"
 datas = [
     (str(SOURCE / "frontend"), "frontend"),
 ]
-
 binaries = []
 hiddenimports = [
     "backend.app.main",
@@ -19,6 +19,9 @@ hiddenimports = [
     "backend.app.routes_runs",
     "backend.app.runner",
     "backend.app.uploads",
+    "backend.app.jobinja",
+    "backend.app.jobinja_challenge",
+    "backend.app.jobinja_browser",
     "backend.app.extraction",
     "backend.app.qualification",
     "backend.app.output_writer",
@@ -41,6 +44,17 @@ hiddenimports = [
     "jdatetime",
     "multipart",
 ]
+
+# Playwright is OPTIONAL. Jobinja's cookie challenge is solved in pure Python, and
+# the real browser is only a fallback for a template change. Bundling it always
+# pulled its ~150 MB Node driver into every Windows/Linux build, which is where
+# those builds failed. Installed? Bundle it; missing? Ship without it.
+if importlib.util.find_spec("playwright") is not None:
+    from PyInstaller.utils.hooks import collect_data_files
+
+    hiddenimports.append("playwright.sync_api")
+    for source, destination in collect_data_files("playwright"):
+        (datas if str(source).endswith(".py") else binaries).append((str(source), destination))
 
 a = Analysis(
     [str(HERE / "launcher.py")],

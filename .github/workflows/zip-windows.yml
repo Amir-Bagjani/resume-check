@@ -1,0 +1,53 @@
+name: Windows resume import and ZIP validation
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'source/backend/app/**'
+      - 'source/backend/tests/test_zip.py'
+      - 'source/backend/tests/test_jobinja.py'
+      - 'source/frontend/index.html'
+      - 'source/frontend/styles.css'
+      - 'source/frontend/js/app_setup.js'
+      - 'source/frontend/js/app_progress.js'
+      - 'source/frontend/tests/setup.test.cjs'
+      - 'source/frontend/tests/jobinja.test.cjs'
+      - 'source/frontend/js/app_results.js'
+      - 'source/frontend/tests/zip.test.cjs'
+      - 'packaging/**'
+      - '.github/workflows/zip-windows.yml'
+
+jobs:
+  zip:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install focused test dependencies
+        run: python -m pip install -r source/backend/requirements-dev.txt
+      - name: Jobinja, ZIP API and file-error tests only
+        env:
+          PYTHONPATH: source
+          PYTHONUTF8: '1'
+        run: python -m pytest source/backend/tests/test_zip.py source/backend/tests/test_jobinja.py -q -s
+      - name: Source selection, Jobinja links and ZIP save tests only
+        run: node --test source/frontend/tests/setup.test.cjs source/frontend/tests/jobinja.test.cjs source/frontend/tests/zip.test.cjs
+      - name: Build real Windows EXE
+        run: .\packaging\build_windows.ps1
+      - name: Open and extract ZIPs downloaded from ResumeCheck.exe
+        run: python packaging/smoke.py dist/ResumeCheck.exe --zip-only
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Windows-ZIP-evidence
+          path: |
+            smoke-server.log
+            dist/ResumeCheck.exe

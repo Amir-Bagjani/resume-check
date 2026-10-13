@@ -47,10 +47,30 @@ def test_health_static_and_fa_packaging_scenarios():
     assert r.status_code == 403
 
 
-def test_upload_viewer_excel_roundtrip(tmp_path: Path):
+def test_setup_assets_revalidate_and_bypass_previous_ui_cache():
+    from backend.app.main import app
+
+    client = TestClient(app)
+    page = client.get("/")
+    assert page.headers["cache-control"] == "no-cache"
+    for asset in ("styles.css", "js/app_setup.js", "js/app_progress.js", "js/app_results.js"):
+        url = f"/{asset}?v=jobinja-ui-2"
+        assert f'{asset}?v=jobinja-ui-2' in page.text
+        response = client.get(url)
+        assert response.status_code == 200 and response.headers["cache-control"] == "no-cache"
+        assert response.content == (ROOT / "source/frontend" / asset).read_bytes()
+        cached = client.get(url, headers={"If-None-Match": response.headers["etag"]})
+        assert cached.status_code == 304 and cached.headers["cache-control"] == "no-cache"
+    assert "[hidden] { display: none !important; }" in client.get("/styles.css?v=jobinja-ui-2").text
+
+
+def test_upload_viewer_excel_roundtrip(tmp_path: Path, monkeypatch):
     import sys as _sys
 
     from backend.app import runner
+    from backend.app import routes_runs
+    monkeypatch.setattr(runner, "user_data_dir", lambda: tmp_path / "user-data")
+    monkeypatch.setattr(routes_runs.tempfile, "gettempdir", lambda: str(tmp_path))
 
     if "backend.app.runner" in _sys.modules:
         r = _sys.modules["backend.app.runner"]
@@ -76,7 +96,7 @@ def test_upload_viewer_excel_roundtrip(tmp_path: Path):
     assert up.status_code == 200, up.text
     upload_id = up.json()["uploadId"]
 
-    run = c.post(f"/api/uploads/{upload_id}/run", json={"criteria": {"minYears": 5, "keywords": ["React"]}, "outputFolder": None})
+    run = c.post(f"/api/uploads/{upload_id}/run", json={"criteria": {"minYears": 5}, "outputFolder": None})
     assert run.status_code == 200, run.text
     run_id = run.json()["runId"]
     for _ in range(100):

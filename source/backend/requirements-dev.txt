@@ -1,5 +1,9 @@
 # Test-only dependencies. Install with:
 #   pip install -r backend/requirements.txt -r backend/requirements-dev.txt
 # reportlab generates the PDF fixtures used by the extraction tests.
+# playwright covers the optional browser fallback and its tests. The packaged app
+# does NOT need it: the Jobinja cookie challenge is solved in pure Python, so a
+# missing Playwright only disables the rarely used browser fallback.
 -r requirements.txt
 reportlab==4.2.5
+playwright==1.55.0

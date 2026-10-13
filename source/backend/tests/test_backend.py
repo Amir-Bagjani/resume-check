@@ -1,6 +1,7 @@
 """Backend tests: declared-experience extraction, strict filtering, Persian output."""
 from __future__ import annotations
 
+import logging
 import tempfile
 import time
 from datetime import date
@@ -61,7 +62,7 @@ def resume_dir(tmp_path: Path):
         "Designer",
         "A creative professional with React and Material UI skills.",
     ])
-    # Candidate D: declared 6 years but Vue/Angular only -> Not Qualified on keywords
+    # Candidate D: declared 6 years -> Qualified regardless of technology
     _make_docx(d / "candidate_d.docx", [
         "Dan Davis",
         "Frontend Developer",
@@ -192,7 +193,7 @@ def test_never_fabricates_value_for_empty_text():
 # --------------------------------------------------------------------------
 
 
-def _evaluate(text: str, min_years: float | None, keywords: list[str] | None = None):
+def _evaluate(text: str, min_years: float | None):
     from backend.app.extraction import extract_declared_experience
     from backend.app.models import ResumeFacts, ScreeningCriteria
     from backend.app.qualification import evaluate
@@ -202,7 +203,7 @@ def _evaluate(text: str, min_years: float | None, keywords: list[str] | None = N
     facts.experience_source_text = d.source_text
     facts.experience_source_section = d.section
     facts.experience_detection_status = d.status
-    return evaluate(facts, ScreeningCriteria(min_years=min_years, keywords=keywords or []))
+    return evaluate(facts, ScreeningCriteria(min_years=min_years))
 
 
 def test_minimum_five_declared_two_plus_is_rejected():
@@ -242,7 +243,7 @@ def test_persian_rejection_reason_is_fa():
 def test_qualification_matrix():
     from backend.app.models import DetectionStatus, ResumeFacts, ScreeningCriteria
     from backend.app.qualification import evaluate
-    crit = ScreeningCriteria(min_years=5, keywords=["React"])
+    crit = ScreeningCriteria(min_years=5)
 
     def facts(**kw):
         kw.setdefault("experience_detection_status", DetectionStatus.FOUND)
@@ -266,20 +267,6 @@ def test_unreadable_marked_undetermined():
     r = evaluate(ResumeFacts(filename="x.pdf"), ScreeningCriteria(min_years=5), unreadable=True)
     assert r.final_status.value == "Undetermined"
     assert "قابل تحلیل نبود" in r.reason
-
-
-def test_keyword_fuzzy_variants():
-    from backend.app.extraction import match_keywords
-    found, missing = match_keywords("Experienced with react, REACT.JS and material-ui.", ["React", "Material UI"])
-    assert found == ["React", "Material UI"]
-    assert missing == []
-
-
-def test_keyword_vue_only_misses_react():
-    from backend.app.extraction import match_keywords
-    found, missing = match_keywords("Vue.js and Angular developer.", ["React"])
-    assert found == []
-    assert missing == ["React"]
 
 
 # --------------------------------------------------------------------------
@@ -323,7 +310,7 @@ def test_full_run_end_to_end(resume_dir: Path):
     c = _client()
     res = c.post("/api/runs", json={
         "folderPath": str(resume_dir),
-        "criteria": {"minYears": 5, "keywords": ["React", "Material UI"]},
+        "criteria": {"minYears": 5},
     })
     assert res.status_code == 200, res.text
     run_id = res.json()["runId"]
@@ -340,7 +327,7 @@ def test_full_run_end_to_end(resume_dir: Path):
     assert by_name["candidate_a.docx"]["finalStatus"] == "Qualified"
     assert by_name["candidate_b.docx"]["finalStatus"] == "Not Qualified"
     assert by_name["candidate_c.docx"]["finalStatus"] == "Undetermined"
-    assert by_name["candidate_d.docx"]["finalStatus"] == "Not Qualified"
+    assert by_name["candidate_d.docx"]["finalStatus"] == "Qualified"
     # Declared values come straight from the resume text.
     assert by_name["candidate_a.docx"]["declaredExperienceYears"] == 7
     assert by_name["candidate_b.docx"]["declaredExperienceYears"] == 3
@@ -383,7 +370,7 @@ def test_pdf_processing_without_regression(tmp_path: Path):
     client = _client()
     res = client.post("/api/runs", json={
         "folderPath": str(d),
-        "criteria": {"minYears": 5, "keywords": ["React"]},
+        "criteria": {"minYears": 5},
     })
     assert res.status_code == 200, res.text
     run_id = res.json()["runId"]
@@ -411,7 +398,90 @@ def _report_for(run, out: Path):
 
 def _sample_run():
     from backend.app.models import ScreeningCriteria, ScreeningRun
-    return ScreeningRun(run_id="t", folder_path="/tmp", criteria=ScreeningCriteria(min_years=5, keywords=["React"]))
+    return ScreeningRun(run_id="t", folder_path="/tmp", criteria=ScreeningCriteria(min_years=5))
+
+
+# --------------------------------------------------------------------------
+# Excel character safety (resume PDF text broke report generation)
+# --------------------------------------------------------------------------
+
+# The Persian sentence that really reached the sheet writer, with the control
+# characters pypdf returns for it.
+REAL_RESUME_TEXT = (
+    "مسئول توسعه و تیم ( دانشگاه صنع\u200cتی شریف\x00 ساختمان فناوری\x0b ) "
+    "1403 اسفند تا مرداد 1405\x1e"
+)
+
+
+def _run_with_reason(text: str, tmp_path: Path):
+    from backend.app.models import Applicant, ScreeningCriteria, ScreeningRun, ResumeResult
+
+    run = ScreeningRun(run_id="t", folder_path=str(tmp_path), criteria=ScreeningCriteria(min_years=5))
+    run.found = run.processed = 1
+    run.results = [ResumeResult(filename="cv.pdf", candidate_name="نام متقاضی", reason=text,
+                                experience_source_text=text)]
+    run.applicants = [Applicant("id-1", 2, "نام متقاضی", jobinja_url="https://panel.jobinja.ir/application/share/1", filename="cv.pdf",
+                                download_status="downloaded")]
+    return run
+
+
+def test_excel_safe_removes_only_forbidden_characters():
+    from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
+
+    from backend.app.report import MAX_CELL_CHARS, excel_safe
+
+    cleaned = excel_safe(REAL_RESUME_TEXT)
+    assert ILLEGAL_CHARACTERS_RE.search(cleaned) is None
+    assert "دانشگاه صنع\u200cتی شریف" in cleaned  # Persian text and ZWNJ survive
+    assert "مسئول توسعه" in cleaned
+    assert len(excel_safe("ا" * (MAX_CELL_CHARS + 500))) == MAX_CELL_CHARS
+    assert excel_safe(7) == 7
+
+
+def test_report_with_control_characters_is_written_and_readable(tmp_path: Path):
+    from openpyxl import load_workbook
+
+    run = _run_with_reason(f"سابقه کار اعلام\u200cشده: ۵ سال. متن رزومه: «{REAL_RESUME_TEXT}»", tmp_path)
+    path = _report_for(run, tmp_path)  # used to raise IllegalCharacterError
+    workbook = load_workbook(path)
+    rows = {cell.value for row in workbook["گزارش غربال"].iter_rows() for cell in row}
+    metadata = list(workbook["دریافت رزومه\u200cها"].values)
+    assert any("دانشگاه صنع\u200cتی شریف" in (value or "") for value in rows)
+    assert metadata[1][5] == "دریافت شد" and "دانشگاه صنع\u200cتی شریف" in metadata[1][9]
+    assert "\x00" in run.results[0].reason  # the extracted text itself is not modified
+    assert "\x00" in run.results[0].reason
+
+
+def test_excel_safe_text_never_starts_a_formula(tmp_path: Path):
+    from openpyxl import load_workbook
+
+    run = _run_with_reason("=SUM(A1:A9) \x07", tmp_path)
+    workbook = load_workbook(_report_for(run, tmp_path))
+    written = [cell for row in workbook["دریافت رزومه\u200cها"].iter_rows() for cell in row
+               if isinstance(cell.value, str) and "SUM(A1" in cell.value]
+    assert written and written[0].data_type == "s"
+
+
+def test_report_failure_finishes_the_run_with_a_persian_error(tmp_path: Path, monkeypatch, caplog):
+    from openpyxl.utils.exceptions import IllegalCharacterError
+
+    from backend.app import runner
+    from backend.app.models import ResumeResult, RunState, ScreeningCriteria, ScreeningRun
+
+    def broken(*args, **kwargs):
+        raise IllegalCharacterError("SENSITIVE cannot be used in worksheets.")
+
+    monkeypatch.setattr(runner, "write_report", broken)
+    monkeypatch.setattr(runner, "copy_resumes", lambda *a, **k: [])
+    run = ScreeningRun(run_id="r1", folder_path=str(tmp_path), criteria=ScreeningCriteria(min_years=5))
+    run.found = run.processed = 1
+    run.results = [ResumeResult(filename="cv.pdf")]
+    with caplog.at_level(logging.ERROR):
+        runner._finalize(run)
+    assert run.state == RunState.FAILED  # never left running, so the UI stops polling
+    assert run.error and "لاگ" in run.error and "SENSITIVE" not in run.error
+    assert "IllegalCharacterError" in caplog.text and "SENSITIVE" in caplog.text
+    assert runner.run_to_dict(run)["error"] == run.error
 
 
 def test_excel_headers_and_sheet_are_persian_rtl(tmp_path: Path):
@@ -518,28 +588,23 @@ def test_excel_removes_illegal_controls_from_all_input_cells(tmp_path: Path):
     clean = "ㅤFront-End توسعه‌دهنده\tReact\n۵ سال\rتهران"
     dirty = clean + controls
     run = _sample_run()
-    run.criteria.keywords = [dirty]
     result = ResumeResult(
         filename=dirty,
         candidate_name=dirty,
         experience_source_text=dirty,
         experience_source_section=dirty,
-        skills_detected=[dirty],
-        required_found=[dirty],
-        required_missing=[dirty],
         reason=dirty,
     )
     run.results = [result]
 
     ws = load_workbook(_report_for(run, tmp_path)).active
     header_row = next(i for i, row in enumerate(ws.rows, start=1) if row[0].value == "نام فایل رزومه")
-    for col in (1, 2, 4, 5, 8, 9, 10, 12):
+    for col in (1, 2, 4, 5, 10):
         assert ws.cell(row=header_row + 1, column=col).value == clean
     summary = dict((row[0].value, row[1].value) for row in ws.iter_rows(max_row=9))
-    assert clean in summary["معیارهای غربال استفاده‌شده"]
+    assert "۵ سال" in summary["معیارهای غربال استفاده‌شده"]
     # Sanitizing the report must leave the extracted text and criteria intact.
     assert result.experience_source_text == dirty
-    assert run.criteria.keywords == [dirty]
 
 
 def test_output_collision_suffix(tmp_path: Path):
@@ -557,7 +622,7 @@ def test_pause_resume_cancel(tmp_path: Path):
     d.mkdir()
     for i in range(12):
         _make_docx(d / f"r{i:02d}.docx", [f"نامزد {i}", "5 years of professional experience.", "Skills: React"])
-    run = runner.create_run(str(d), ScreeningCriteria(min_years=3, keywords=["React"]))
+    run = runner.create_run(str(d), ScreeningCriteria(min_years=3))
     assert runner.pause_run(run.run_id) is True
     assert runner.get_run(run.run_id).state.value == "paused"
     assert runner.resume_run(run.run_id) is True
@@ -567,7 +632,7 @@ def test_pause_resume_cancel(tmp_path: Path):
             break
         time.sleep(0.1)
     assert runner.get_run(run.run_id).state.value == "finished"
-    run2 = runner.create_run(str(d), ScreeningCriteria(keywords=["React"]))
+    run2 = runner.create_run(str(d), ScreeningCriteria(min_years=3))
     assert runner.cancel_run(run2.run_id) is True
 
 # --------------------------------------------------------------------------

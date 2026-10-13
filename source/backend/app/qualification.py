@@ -1,9 +1,6 @@
-"""Qualification engine: pluggable criterion evaluators with AND logic."""
+"""Compare only the candidate's declared experience with the required minimum."""
 from __future__ import annotations
 
-from typing import Protocol
-
-from .extraction import match_keywords
 from .locale import format_years
 from .models import (
     DetectionStatus,
@@ -15,21 +12,12 @@ from .models import (
 )
 
 
-class Criterion(Protocol):
-    name: str
-    def evaluate(self, facts: ResumeFacts, criteria: ScreeningCriteria) -> tuple[str, str] | None:
-        """Return (status, message) or None when inactive. status in pass/fail/unknown."""
-        ...
-
-
 class MinYearsCriterion:
     """Compares ONLY the candidate's self-declared number against the minimum.
 
     No date arithmetic, no job-duration summing, no "+" inflation: "2+ years"
     is compared as 2.
     """
-
-    name = "minYears"
 
     def evaluate(self, facts, criteria):
         if criteria.min_years is None:
@@ -57,30 +45,6 @@ class MinYearsCriterion:
         )
 
 
-class KeywordsCriterion:
-    name = "keywords"
-
-    def evaluate(self, facts, criteria):
-        if not criteria.keywords:
-            return None
-        found, missing = match_keywords(facts.raw_text, criteria.keywords)
-        if not missing:
-            return ("pass", f"فناوری‌های موردنیاز در رزومه ذکر شده است: {'، '.join(found)}.")
-        if not found:
-            return (
-                "fail",
-                f"هیچ‌کدام از فناوری‌های موردنیاز یافت نشد: {'، '.join(missing)}.",
-            )
-        return (
-            "fail",
-            f"فناوری‌های ذکرشده: {'، '.join(found)} — فناوری‌های یافت‌نشده: {'، '.join(missing)}.",
-        )
-
-
-CRITERIA: list[Criterion] = [MinYearsCriterion(), KeywordsCriterion()]
-# ponytail: new criteria = one class appended here, no workflow change.
-
-
 def _source_note(result: ResumeResult) -> str:
     if not result.experience_source_text:
         return ""
@@ -106,60 +70,26 @@ def evaluate(facts: ResumeFacts, criteria: ScreeningCriteria, unreadable: bool =
             "رزومه قابل تحلیل نبود (متن قابل استخراجی یافت نشد؛ فایل اسکن‌شده، خراب یا محافظت‌شده است). "
             "برای بررسی در نظر گرفته شد."
         )
-        if criteria.keywords:
-            result.required_missing = list(criteria.keywords)
         return result
 
-    found, missing = match_keywords(facts.raw_text, criteria.keywords) if criteria.keywords else ([], [])
-    result.required_found = found
-    result.required_missing = missing
-
-    messages: list[str] = []
-    exp_status = ExperienceStatus.UNKNOWN
-    has_fail = False
-    has_unknown = False
-    active = 0
-    for criterion in CRITERIA:
-        outcome = criterion.evaluate(facts, criteria)
-        if outcome is None:
-            continue
-        active += 1
-        status, msg = outcome
-        messages.append(msg)
-        if criterion.name == "minYears":
-            exp_status = {"pass": ExperienceStatus.PASS, "fail": ExperienceStatus.FAIL}.get(status, ExperienceStatus.UNKNOWN)
-        if status == "fail":
-            has_fail = True
-        elif status == "unknown":
-            has_unknown = True
-
-    if criteria.min_years is None:
-        exp_status = (
-            ExperienceStatus.UNKNOWN
-            if facts.declared_experience_years is None
-            else ExperienceStatus.PASS
-        )
-    result.experience_status = exp_status
+    outcome = MinYearsCriterion().evaluate(facts, criteria)
+    status, message = outcome if outcome is not None else ("unknown", "هیچ معیار غربالی فعال نبود.")
+    result.experience_status = {"pass": ExperienceStatus.PASS, "fail": ExperienceStatus.FAIL}.get(status, ExperienceStatus.UNKNOWN)
 
     declared_note = ""
     if result.declared_experience_years is not None:
         declared_note = f" سابقه کار اعلام‌شده: {format_years(result.declared_experience_years)}."
 
-    if active == 0:
+    if outcome is None:
         result.final_status = FinalStatus.UNDETERMINED
-        result.reason = "هیچ معیار غربالی فعال نبود."
-    elif has_fail:
+        result.reason = message
+    elif status == "fail":
         result.final_status = FinalStatus.NOT_QUALIFIED
-        result.reason = declared_note + _source_note(result) + " نتیجه: رد. " + " ".join(messages)
-    elif has_unknown:
+        result.reason = declared_note + _source_note(result) + " نتیجه: رد. " + message
+    elif status == "unknown":
         result.final_status = FinalStatus.UNDETERMINED
-        result.reason = (
-            declared_note + _source_note(result) + " نتیجه: نیازمند بررسی. " + " ".join(messages)
-        )
+        result.reason = declared_note + _source_note(result) + " نتیجه: نیازمند بررسی. " + message
     else:
         result.final_status = FinalStatus.QUALIFIED
-        detail = " ".join(messages)
-        result.reason = declared_note + _source_note(result) + " نتیجه: تأیید."
-        if detail:
-            result.reason += " " + detail
+        result.reason = declared_note + _source_note(result) + " نتیجه: تأیید. " + message
     return result
