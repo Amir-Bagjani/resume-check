@@ -12,6 +12,10 @@
 
   var ACCEPTED = [".pdf", ".docx"];
 
+  // A browser asks the user to confirm an upload that carries many files at once,
+  // so a folder goes up in small batches under one upload id.
+  var UPLOAD_BATCH = 8;
+
   var state = {
     folderName: "",
     fileCount: 0,
@@ -125,42 +129,61 @@
     state.fileCount = 0;
     state.uploadId = null;
     $("folder-btn").classList.add("is-done");
-    setStatus("در حال بارگذاری " + faNum(usable.length) + " فایل…");
+    setStatus("در حال بارگذاری ۰ از " + faNum(usable.length) + " فایل…");
     refreshStart();
 
-    var form = new FormData();
-    usable.forEach(function (f) {
-      // Send the folder-relative path so two resumes that share a file name in
-      // different sub-folders stay distinct on the server.
-      form.append("files", f, f.webkitRelativePath || f.name);
-    });
+    // Send the folder in small batches: a browser asks the user to confirm a
+    // bulk upload otherwise, and one failing chunk no longer loses the whole run.
+    var uploadId = null;
+    var sent = 0;
+    var batch = usable.slice(0, UPLOAD_BATCH);
+    var pending = usable.slice(UPLOAD_BATCH);
 
-    fetch("/api/uploads", { method: "POST", body: form })
-      .catch(function () {
-        throw new Error("بارگذاری انجام نشد. پنجره ResumeCheck را باز نگه دارید و مطمئن شوید فایل‌های انتخاب‌شده روی این رایانه قابل خواندن‌اند.");
-      })
-      .then(function (res) {
-        return res.json().catch(function () { return {}; }).then(function (body) {
-          if (!res.ok) throw new Error(body.detail || ("بارگذاری ناموفق بود (" + res.status + ")"));
-          return body;
-        });
-      })
-      .then(function (data) {
-        state.uploadId = data.uploadId;
-        state.fileCount = data.fileCount;
-        if (data.folderName) state.folderName = data.folderName;
-        if (typeof data.skipped === "number") state.skipped = data.skipped;
-        state.uploading = false;
-        setStatus("");
-        renderSummary();
-        refreshStart();
-      })
-      .catch(function (err) {
-        clearFolder();
-        setStatus(err.message || "بارگذاری فایل‌ها ناموفق بود.", true);
-        showError(err.message || "بارگذاری فایل‌ها ناموفق بود.");
-        refreshStart();
+    function sendNext() {
+      var form = new FormData();
+      batch.forEach(function (f) {
+        // Send the folder-relative path so two resumes that share a file name in
+        // different sub-folders stay distinct on the server.
+        form.append("files", f, f.webkitRelativePath || f.name);
       });
+      if (uploadId) form.append("upload_id", uploadId);
+      sent += batch.length;
+      setStatus("در حال بارگذاری " + faNum(sent) + " از " + faNum(usable.length) + " فایل…");
+
+      return fetch("/api/uploads", { method: "POST", body: form })
+        .catch(function () {
+          throw new Error("بارگذاری انجام نشد. پنجره ResumeCheck را باز نگه دارید و مطمئن شوید فایل‌های انتخاب‌شده روی این رایانه قابل خواندن‌اند.");
+        })
+        .then(function (res) {
+          return res.json().catch(function () { return {}; }).then(function (body) {
+            if (!res.ok) throw new Error(body.detail || ("بارگذاری ناموفق بود (" + res.status + ")"));
+            return body;
+          });
+        })
+        .then(function (data) {
+          uploadId = data.uploadId || uploadId;
+          state.fileCount = data.fileCount;
+          if (data.folderName) state.folderName = data.folderName;
+          if (typeof data.skipped === "number") state.skipped = skipped + data.skipped;
+          if (pending.length) {
+            batch = pending.slice(0, UPLOAD_BATCH);
+            pending = pending.slice(UPLOAD_BATCH);
+            return sendNext();
+          }
+          state.uploadId = uploadId;
+          state.uploading = false;
+          setStatus("");
+          renderSummary();
+          refreshStart();
+        });
+    }
+
+    sendNext().catch(function (err) {
+      clearFolder();
+      setStatus(err.message || "بارگذاری فایل‌ها ناموفق بود.", true);
+      showError(err.message || "بارگذاری فایل‌ها ناموفق بود.");
+      refreshStart();
+    });
   }
 
   function changeSource(source) {

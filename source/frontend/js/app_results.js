@@ -195,7 +195,9 @@
 
   function createReviewActions(row) {
     var actions = document.createElement("div");
-    actions.className = "review-actions";
+    // In the table the decisions form one segmented control; the viewer keeps
+    // its own plain button row through #viewer-review-actions.
+    actions.className = row ? "review-actions seg" : "review-actions";
     Object.keys(REVIEW_LABELS).forEach(function (decision) {
       if (CATEGORY_STATUS[decision] === row.finalStatus) return;
       var action = document.createElement("button");
@@ -427,8 +429,9 @@
       status.appendChild(badge);
       tr.appendChild(status);
 
-      // Reason
+      // Reason: the flexible column, so it takes whatever width is left.
       var reason = document.createElement("td");
+      reason.className = "c-reason";
       var rc = document.createElement("div");
       rc.className = "reason-cell";
       rc.textContent = r.reason || "—";
@@ -441,7 +444,7 @@
       var act = document.createElement("td");
       act.className = "c-act";
       var stack = document.createElement("div");
-      stack.className = "act-stack";
+      stack.className = "act-cell";
       var fileRow = document.createElement("div");
       fileRow.className = "act-row";
       var btn = document.createElement("button");
@@ -511,16 +514,13 @@
       var title = document.createElement("strong");
       title.textContent = faNum(d.downloadFailures.length) + " رزومه دریافت نشد؛ این موارد ارزیابی نشده‌اند.";
       failures.appendChild(title);
-      var details = document.createElement("details");
-      var summary = document.createElement("summary");
-      summary.textContent = "جزئیات خطاها و گزارش دریافت";
-      details.appendChild(summary);
-      d.downloadFailures.forEach(function (failure) {
-        var item = document.createElement("p");
-        item.textContent = (failure.candidateName || "متقاضی ردیف " + faNum(failure.excelRow)) + " — " + failure.reason;
-        details.appendChild(item);
-      });
-      failures.appendChild(details);
+      // Names only: the request trace was a debugging aid and stays in the log file.
+      var names = document.createElement("p");
+      names.className = "failure-names";
+      names.textContent = d.downloadFailures.map(function (failure) {
+        return failure.candidateName || "متقاضی ردیف " + faNum(failure.excelRow);
+      }).join("، ");
+      failures.appendChild(names);
     }
     if (!viewerKey) $("results-heading").focus();
   }

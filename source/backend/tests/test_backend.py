@@ -1100,6 +1100,40 @@ def test_upload_accepts_pdf_and_docx():
     assert set(body["files"]) == {"a.pdf", "b.docx"}
 
 
+def test_upload_batches_join_one_staging_folder():
+    """The client sends a folder in batches (browsers confirm bulk uploads)."""
+    c = _client()
+    first = c.post("/api/uploads",
+                   files=[("files", (f"resumes/a{i}.docx", _docx_bytes([f"C{i}", "4+ years"]), "application/octet-stream"))
+                          for i in range(3)])
+    assert first.status_code == 200, first.text
+    upload_id = first.json()["uploadId"]
+    second = c.post("/api/uploads",
+                    files=[("files", (f"resumes/b{i}.docx", _docx_bytes([f"D{i}", "4+ years"]), "application/octet-stream"))
+                           for i in range(2)],
+                    data={"upload_id": upload_id})
+    assert second.status_code == 200, second.text
+    body = second.json()
+    assert body["uploadId"] == upload_id          # same staging directory
+    assert body["fileCount"] == 5                # cumulative count
+    assert len(body["files"]) == 5
+
+
+def test_upload_batch_cannot_reach_a_foreign_upload_id(tmp_path: Path):
+    c = _client()
+    other = tmp_path / "elsewhere"
+    other.mkdir()
+    foreign = "a" * 32
+    (other / foreign).mkdir()
+    res = c.post("/api/uploads", files=[("files", ("resumes/a.docx", _docx_bytes(["A", "4+ years"]),
+                                                "application/octet-stream"))],
+                 data={"upload_id": foreign})
+    assert res.status_code == 200
+    # An unknown or crafted id never continues someone else's folder; it starts fresh.
+    assert res.json()["uploadId"] != foreign
+    assert [path for path in other.rglob("*") if path.is_file()] == []
+
+
 def test_upload_rejects_folder_without_supported_files():
     c = _client()
     res = _upload(c, [("notes.txt", b"x"), ("data.json", b"{}")])

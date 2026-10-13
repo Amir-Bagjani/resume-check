@@ -14,6 +14,8 @@ function dom() {
       set textContent(value) { text = value; this.children = []; },
       get textContent() { return text + this.children.map(child => child.textContent).join(""); },
       appendChild(child) { this.children.push(child); },
+      replaceChildren(...nodes) { this.children = nodes; },
+      contains(node) { return this.children.includes(node); },
       setAttribute(name, value) { this.attributes[name] = value; },
       getAttribute(name) { return this.attributes[name]; },
       addEventListener(event, handler) { this.listeners[event] = handler; },
@@ -60,10 +62,12 @@ test("Jobinja links keep the exact row URL in every status, alongside the resume
     }
   });
   assert.match(app.el("download-failures").textContent, /این موارد ارزیابی نشده‌اند/);
-  const failure = walk(app.el("download-failures")).find(node => node.tag === "p");
-  assert.ok(failure.textContent.includes("\nHTTP 200؛ Content-Type=text/html\nلینک‌های دانلود: 0"));
-  assert.ok(failure.textContent.includes("<script>untrusted</script>"));
-  assert.equal(failure.children.length, 0, "Diagnostics render as text, never HTML");
+  const names = app.el("download-failures").children.find(node => node.className === "failure-names");
+  assert.ok(names, "failures are listed by name");
+  assert.equal(names.textContent, "نام دیگر");
+  // The request trace was a debugging aid: it must not reach the results view.
+  assert.ok(!app.el("download-failures").textContent.includes("HTTP 200"));
+  assert.ok(!app.el("download-failures").textContent.includes("<script>untrusted</script>"));
   assert.equal(rows.length, 5, "Failed download is separate from evaluated resumes");
 });
 
@@ -128,7 +132,19 @@ test("a failed report generation stops the loading poll and shows a Persian erro
   assert.equal(shown.length, 0, "a failed run is not presented as finished results");
 });
 
-test("operation buttons are laid out as two aligned rows of four actions", () => {
+test("the viewer header decision control is sized to its content, not the header", () => {
+  const css = fs.readFileSync(path.join(__dirname, "../styles.css"), "utf8");
+  // The same segmented control shows in the viewer header; there it must not
+  // stretch across the header, while the table row control fills the column.
+  const viewerRule = css.match(/#viewer-review-actions \.review-actions\.seg \{[^}]*\}/);
+  assert.ok(viewerRule, "the viewer header sizes its own control");
+  assert.match(viewerRule[0], /width: auto/);
+  const segmentRule = css.match(/\.seg \{[^}]*\}/);
+  assert.match(segmentRule[0], /width: 100%/);
+  assert.match(css, /#viewer-review-actions \{ display: flex/);
+});
+
+test("row actions stack the resume buttons above a full-width decision control", () => {
   const app = dom();
   const window = { App: { faNum: String } };
   vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../js/app_results.js"), "utf8"),
@@ -143,27 +159,21 @@ test("operation buttons are laid out as two aligned rows of four actions", () =>
   assert.equal(row.children[0].textContent, "1", "rows are numbered from one");
   const cell = row.children.find(node => node.className === "c-act");
   assert.ok(cell, "the operations cell exists");
-  const stack = cell.children[0];
-  assert.equal(stack.className, "act-stack");
-  const [fileRow, reviewRow] = stack.children;
-  assert.equal(fileRow.className, "act-row");
-  assert.equal(reviewRow.className, "review-actions");
-  // Two file actions and exactly two review decisions (the current status is skipped).
-  assert.equal(fileRow.children.length, 2);
-  assert.equal(reviewRow.children.length, 2);
-  const actions = [...fileRow.children, ...reviewRow.children];
-  assert.equal(actions.length, 4);
-  actions.forEach(node => {
-    assert.ok(node.className.split(" ").includes("view-btn"), node.className);
-  });
-  assert.ok(!actions.some(node => (node.className || "").includes("is-primary")));
-  // Decision buttons carry the status colours: approved=ok, rejected=bad, needs-review=warn.
-  assert.deepEqual(reviewRow.children.map(node => node.className.split(" ").pop()).sort(),
+  const actions = cell.children[0];
+  assert.equal(actions.className, "act-cell");
+  // Resume actions on the first row, the decision control spanning the full width below.
+  assert.deepEqual(actions.children.map(node => node.className), ["act-row", "review-actions seg"]);
+  const [fileRow, segment] = actions.children;
+  assert.deepEqual(fileRow.children.map(node => node.tag), ["button", "a"]);
+  const [view, jobinja] = fileRow.children;
+  assert.equal(view.textContent, "مشاهده رزومه");
+  assert.equal(jobinja.textContent, "جابینجا");
+  assert.equal(segment.className, "review-actions seg");
+  // Exactly two decisions: the current status is skipped.
+  assert.equal(segment.children.length, 2);
+  assert.deepEqual(segment.children.map(node => node.className.split(" ").pop()).sort(),
                    ["bad", "warn"]);
-  fileRow.children.forEach(node => assert.ok(!/\bok\b|\bbad\b|\bwarn\b/.test(node.className)));
-  assert.equal(fileRow.children[0].textContent, "مشاهده رزومه");
-  assert.ok(!fileRow.children[0].children.some(node => node.tag === "svg"), "no icon left in the view button");
-  assert.equal(fileRow.children[1].tag, "a");
-  assert.equal(fileRow.children[1].textContent, "جابینجا");
-  reviewRow.children.forEach(node => assert.ok(node.className.split(" ").includes("view-btn")));
+  [view, jobinja].forEach(node => assert.ok(!/\bok\b|\bbad\b|\bwarn\b/.test(node.className)));
+  assert.ok(!view.children.some(node => node.tag === "svg"), "no icon left in the view button");
+  assert.equal(jobinja.href, "https://jobinja.ir/resume/1?token=EXACT");
 });

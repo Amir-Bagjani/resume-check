@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Literal, Optional
 from zipfile import ZIP_DEFLATED, ZipFile
 
-from fastapi import APIRouter, Body, File, HTTPException, UploadFile
+from fastapi import APIRouter, Body, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 from starlette.background import BackgroundTask
@@ -147,8 +147,13 @@ def cancel_run(run_id: str):
 
 
 @router.post("/uploads")
-async def create_upload(files: list[UploadFile] = File(...)):
-    """Stage the resumes chosen with the browser folder picker."""
+async def create_upload(files: list[UploadFile] = File(...), upload_id: str | None = Form(None)):
+    """Stage the resumes chosen with the browser folder picker.
+
+    The client sends a folder in small batches (Chrome asks the user to confirm a
+    bulk upload otherwise) and repeats ``upload_id`` so the batches land in one
+    staging directory. Without it every call still starts a fresh upload.
+    """
     if not files:
         raise HTTPException(status_code=400, detail="هیچ فایلی انتخاب نشده است.")
     if len(files) > uploads.MAX_FILES:
@@ -158,14 +163,25 @@ async def create_upload(files: list[UploadFile] = File(...)):
         )
 
     root = Path(tempfile.gettempdir()) / "resume-check-uploads"
-    # Sweep leftovers from an upload that was never processed before adding more.
+    continuing = uploads.staged_dir(root, upload_id) if upload_id else None
     try:
-        uploads.sweep_stale(root)
-        directory = uploads.new_upload_dir(root)
+        if continuing is None:
+            # Sweep leftovers from an upload that was never processed before adding more.
+            uploads.sweep_stale(root)
+            directory = uploads.new_upload_dir(root)
+        else:
+            directory = continuing
     except OSError:
         logger.exception("Cannot create upload staging directory")
         raise HTTPException(status_code=507, detail="امکان ذخیره موقت فایل‌ها وجود ندارد؛ دسترسی و فضای دیسک را بررسی کنید.") from None
-    total = 0
+    staged_before = uploads.list_uploaded(directory)
+    if len(staged_before) + len(files) > uploads.MAX_FILES:
+        uploads.cleanup_upload(directory)
+        raise HTTPException(
+            status_code=413,
+            detail=f"تعداد فایل‌ها بیش از حد مجاز است (حداکثر {uploads.MAX_FILES} فایل).",
+        )
+    total = uploads.staged_bytes(directory)
     accepted: list[str] = []
     rejected: list[str] = []
     try:

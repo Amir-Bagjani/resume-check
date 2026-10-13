@@ -123,6 +123,35 @@ def _staged_name(relative: str, fallback: str) -> str:
     return "/".join(safe_filename(p) for p in parts[1:])
 
 
+def staged_dir(root: Path, upload_id: str) -> Path | None:
+    """Resolve a staging directory from a client-sent id, or None.
+
+    The id must look like the uuid4 hex that ``new_upload_dir`` creates and the
+    directory must still be inside ``root``, so a crafted value cannot reach
+    another folder on disk.
+    """
+    if not re.fullmatch(r"[0-9a-f]{32}", str(upload_id or "")):
+        return None
+    candidate = (root / upload_id).resolve()
+    try:
+        candidate.relative_to(root.resolve())
+    except (OSError, ValueError):
+        return None
+    return candidate if candidate.is_dir() else None
+
+
+def staged_bytes(directory: Path) -> int:
+    """Total size of everything already staged, for the cumulative size limit."""
+    total = 0
+    for entry in directory.rglob("*"):
+        try:
+            if entry.is_file():
+                total += entry.stat().st_size
+        except OSError:
+            continue
+    return total
+
+
 def list_uploaded(directory: Path) -> list[str]:
     """Relative paths of the supported files staged so far, sorted.
 
