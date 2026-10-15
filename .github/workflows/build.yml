@@ -61,22 +61,22 @@ jobs:
           python -m pip install -r source/backend/requirements-dev.txt
       - name: Backend tests - extraction and API
         working-directory: source
-        run: python -m pytest backend/tests/test_backend.py -q -rfEsx --tb=line
+        run: python -m pytest backend/tests/test_backend.py -q -rfEsx --tb=line -o stallwatch_seconds=90
       - name: Backend tests - Jobinja HTTP and parsing
         working-directory: source
-        run: python -m pytest backend/tests/test_jobinja.py -q -rfEsx --tb=line -k "not gone and not unclassified and not viewer and not persian"
+        run: python -m pytest backend/tests/test_jobinja.py -q -rfEsx --tb=line -o stallwatch_seconds=90 -k "not gone and not unclassified and not viewer and not persian"
       - name: Backend tests - Jobinja 403/404 reporting
         working-directory: source
-        run: python -m pytest backend/tests/test_jobinja.py -q -rfEsx --tb=line -k "gone or unclassified"
+        run: python -m pytest backend/tests/test_jobinja.py -q -rfEsx --tb=line -o stallwatch_seconds=90 -k "gone or unclassified"
       - name: Backend tests - Jobinja import pipeline
         working-directory: source
-        run: python -m pytest backend/tests/test_jobinja.py -q -rfEsx --tb=line -k "viewer or persian"
+        run: python -m pytest backend/tests/test_jobinja.py -q -rfEsx --tb=line -o stallwatch_seconds=90 -k "viewer or persian"
       - name: Backend tests - ZIP export
         working-directory: source
-        run: python -m pytest backend/tests/test_zip.py -q -rfEsx --tb=line
+        run: python -m pytest backend/tests/test_zip.py -q -rfEsx --tb=line -o stallwatch_seconds=90
       - name: Backend tests - packaging and launcher
         working-directory: source
-        run: python -m pytest backend/tests/test_packaging.py -q -rfEsx --tb=line
+        run: python -m pytest backend/tests/test_packaging.py -q -rfEsx --tb=line -o stallwatch_seconds=90
       - name: Build (Windows)
         if: runner.os == 'Windows'
         run: .\packaging\build_windows.ps1

@@ -331,6 +331,9 @@ class ImportJob:
     run_id: str | None = None
     cancelled: bool = False
     error: str = ""
+    # The download thread, so a caller (and the tests) can wait until the job is
+    # really finished instead of only seeing the state flip to "screening".
+    thread: threading.Thread | None = field(default=None, repr=False)
     lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
 
@@ -398,4 +401,5 @@ def start_import(job: ImportJob, criteria: ScreeningCriteria, output_folder: str
         runner.set_output_target(job.folder.name, output_folder)
         job.state = "downloading"
     thread = threading.Thread(target=_download, args=(job, criteria), daemon=True)
+    job.thread = thread
     thread.start()

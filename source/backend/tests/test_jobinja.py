@@ -499,13 +499,31 @@ def isolated(tmp_path, monkeypatch):
     return TestClient(app)
 
 
-def wait_for_import(client, import_id):
+def wait_for_import(client, import_id, join=True):
     for _ in range(100):
         state = client.get(f"/api/jobinja/imports/{import_id}").json()
         if state["runId"] or state["state"] == "failed":
-            return state
+            break
         time.sleep(.02)
-    raise AssertionError("Import did not finish")
+    else:
+        raise AssertionError("Import did not finish")
+    if join:
+        wait_for_import_thread(import_id)
+    return state
+
+
+def wait_for_import_thread(import_id, timeout=10.0):
+    """Join the download thread before the test ends.
+
+    The state flips to "screening" while the background thread is still running.
+    A leftover thread logs while pytest writes its summary, and concurrent writes
+    to the captured terminal deadlock the session on Windows.
+    """
+    job = jobinja._imports.get(import_id)
+    thread = getattr(job, "thread", None) if job else None
+    if thread is not None:
+        thread.join(timeout)
+        assert not thread.is_alive(), "download thread outlived the test"
 
 
 def test_shared_pipeline_report_zip_and_no_token_logs(isolated, fake_http, caplog):
