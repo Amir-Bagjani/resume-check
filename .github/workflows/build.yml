@@ -94,6 +94,7 @@ jobs:
           path: ${{ matrix.exe }}
       - name: Upload failure evidence
         if: failure()
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}-evidence
           path: |
