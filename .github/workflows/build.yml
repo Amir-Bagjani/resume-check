@@ -57,9 +57,18 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r source/backend/requirements-dev.txt
-      - name: Backend and launcher tests
+      - name: Backend tests - extraction and API
         working-directory: source
-        run: python -m pytest backend/tests -q
+        run: python -m pytest backend/tests/test_backend.py -q
+      - name: Backend tests - Jobinja import
+        working-directory: source
+        run: python -m pytest backend/tests/test_jobinja.py -q
+      - name: Backend tests - ZIP export
+        working-directory: source
+        run: python -m pytest backend/tests/test_zip.py -q
+      - name: Backend tests - packaging and launcher
+        working-directory: source
+        run: python -m pytest backend/tests/test_packaging.py -q
       - name: Build (Windows)
         if: runner.os == 'Windows'
         run: .\packaging\build_windows.ps1
