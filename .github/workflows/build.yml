@@ -13,24 +13,28 @@ jobs:
           - os: windows-latest
             exe: dist/ResumeCheck.exe
             artifact: resumecheck-Windows
+            timeout: 20
             shell: pwsh
           - os: macos-15-intel
             exe: dist/ResumeCheck.app
             artifact: resumecheck-macOS-x64
+            timeout: 45
             arch: x86_64
             shell: bash
           - os: macos-15
             exe: dist/ResumeCheck.app
             artifact: resumecheck-macOS-arm64
+            timeout: 45
             arch: arm64
             shell: bash
           - os: ubuntu-latest
             exe: dist/ResumeCheck
             artifact: resumecheck-Linux
+            timeout: 45
             shell: bash
     runs-on: ${{ matrix.os }}
     # A stalled step must fail loudly and upload its evidence instead of hanging.
-    timeout-minutes: 45
+    timeout-minutes: ${{ matrix.timeout }}
     defaults:
       run:
         shell: ${{ matrix.shell }}
@@ -38,6 +42,7 @@ jobs:
       # Windows consoles default to a legacy code page; Persian log output crashes otherwise.
       PYTHONUTF8: '1'
       PYTHONIOENCODING: utf-8
+      PYTHONUNBUFFERED: '1'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -61,22 +66,22 @@ jobs:
           python -m pip install -r source/backend/requirements-dev.txt
       - name: Backend tests - extraction and API
         working-directory: source
-        run: python -m pytest backend/tests/test_backend.py -q -rfEsx --tb=line -o stallwatch_seconds=90
+        run: python ../packaging/run_tests.py 480 python -m pytest backend/tests/test_backend.py -ra --tb=short -o stallwatch_seconds=120
       - name: Backend tests - Jobinja HTTP and parsing
         working-directory: source
-        run: python -m pytest backend/tests/test_jobinja.py -q -rfEsx --tb=line -o stallwatch_seconds=90 -k "not gone and not unclassified and not viewer and not persian"
+        run: python ../packaging/run_tests.py 480 python -m pytest backend/tests/test_jobinja.py -vv -ra --tb=short -o stallwatch_seconds=120 -k "not gone and not unclassified and not viewer and not persian"
       - name: Backend tests - Jobinja 403/404 reporting
         working-directory: source
-        run: python -m pytest backend/tests/test_jobinja.py -q -rfEsx --tb=line -o stallwatch_seconds=90 -k "gone or unclassified"
+        run: python ../packaging/run_tests.py 480 python -m pytest backend/tests/test_jobinja.py -vv -ra --tb=short -o stallwatch_seconds=120 -k "gone or unclassified"
       - name: Backend tests - Jobinja import pipeline
         working-directory: source
-        run: python -m pytest backend/tests/test_jobinja.py -q -rfEsx --tb=line -o stallwatch_seconds=90 -k "viewer or persian"
+        run: python ../packaging/run_tests.py 480 python -m pytest backend/tests/test_jobinja.py -vv -ra --tb=short -o stallwatch_seconds=120 -k "viewer or persian"
       - name: Backend tests - ZIP export
         working-directory: source
-        run: python -m pytest backend/tests/test_zip.py -q -rfEsx --tb=line -o stallwatch_seconds=90
+        run: python ../packaging/run_tests.py 480 python -m pytest backend/tests/test_zip.py -ra --tb=short -o stallwatch_seconds=120
       - name: Backend tests - packaging and launcher
         working-directory: source
-        run: python -m pytest backend/tests/test_packaging.py -q -rfEsx --tb=line -o stallwatch_seconds=90
+        run: python ../packaging/run_tests.py 480 python -m pytest backend/tests/test_packaging.py -ra --tb=short -o stallwatch_seconds=120
       - name: Build (Windows)
         if: runner.os == 'Windows'
         run: .\packaging\build_windows.ps1

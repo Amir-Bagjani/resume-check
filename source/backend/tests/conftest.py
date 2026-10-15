@@ -10,8 +10,10 @@ from __future__ import annotations
 import faulthandler
 import sys
 import threading
+import time
 
 DEFAULT_STALL_SECONDS = 90
+DRAIN_SECONDS = 5.0
 
 
 def pytest_addoption(parser):
@@ -30,3 +32,22 @@ def pytest_sessionfinish(session, exitstatus):
     faulthandler.dump_traceback_later(seconds, exit=True, file=sys.stderr)
     # The dump is timer based, so something must keep the process alive until it fires.
     threading.Thread(target=lambda: threading.Event().wait(seconds + 5), daemon=True).start()
+
+
+def pytest_runtest_teardown(item):
+    """Never leave a background thread behind.
+
+    The runner drives its work on 0.3 s timer threads. One of those firing while
+    pytest writes its summary writes to the captured terminal from two threads at
+    once, which deadlocks the session. Waiting for them here keeps the failure
+    report single threaded.
+    """
+    from backend.app import runner
+
+    deadline = time.monotonic() + DRAIN_SECONDS
+    while time.monotonic() < deadline:
+        with runner._lock:
+            pending = [t for t in list(runner._timers.values()) if t.is_alive()]
+        if not pending:
+            return
+        time.sleep(0.05)
