@@ -1,0 +1,53 @@
+name: build-windows
+# The only automatic trigger is a release-style tag, so ordinary pushes never
+# start a second build. Run it by hand from the Actions tab at any time.
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "windows-*"
+
+jobs:
+  exe:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    env:
+      PYTHONUTF8: '1'
+      PYTHONIOENCODING: utf-8
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install packaging dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r source/backend/requirements.txt "pyinstaller==6.22.3"
+          python -m PyInstaller --version
+
+      # Reuses packaging/build_windows.ps1 (and the existing resumecheck.spec with
+      # the frontend assets and the .ico), pointing it at the interpreter whose
+      # dependencies are already installed.
+      - name: Build ResumeCheck.exe
+        shell: pwsh
+        run: .\packaging\build_windows.ps1 -Python "$((Get-Command python).Source)"
+
+      - name: Verify the executable exists
+        shell: pwsh
+        run: |
+          $exe = "dist\ResumeCheck.exe"
+          if (-not (Test-Path $exe)) { throw "Build finished without $exe" }
+          $size = (Get-Item $exe).Length
+          if ($size -lt 1MB) { throw "$exe is only $size bytes; the bundle looks incomplete" }
+          Write-Host "ResumeCheck.exe ready: $size bytes"
+
+      # Only runs when every previous step succeeded, so a failed build never
+      # publishes an artifact that looks usable.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: resumecheck-Windows
+          path: dist/ResumeCheck.exe
+          if-no-files-found: error
+          retention-days: 30

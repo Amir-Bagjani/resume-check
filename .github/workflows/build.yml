@@ -1,7 +1,7 @@
 name: build-standalone
+# Manual only. The Windows EXE comes from build-windows.yml; this matrix stays
+# for the macOS/Linux packages and is run by hand when those need rebuilding.
 on:
-  push:
-    tags: ["v*"]
   workflow_dispatch:
 
 jobs:

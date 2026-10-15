@@ -1,21 +1,7 @@
 name: Windows resume import and ZIP validation
+# Manual only: kept for the focused Windows ZIP check, never on every push.
 on:
   workflow_dispatch:
-  pull_request:
-    paths:
-      - 'source/backend/app/**'
-      - 'source/backend/tests/test_zip.py'
-      - 'source/backend/tests/test_jobinja.py'
-      - 'source/frontend/index.html'
-      - 'source/frontend/styles.css'
-      - 'source/frontend/js/app_setup.js'
-      - 'source/frontend/js/app_progress.js'
-      - 'source/frontend/tests/setup.test.cjs'
-      - 'source/frontend/tests/jobinja.test.cjs'
-      - 'source/frontend/js/app_results.js'
-      - 'source/frontend/tests/zip.test.cjs'
-      - 'packaging/**'
-      - '.github/workflows/zip-windows.yml'
 
 jobs:
   zip:
