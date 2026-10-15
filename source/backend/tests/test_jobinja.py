@@ -7,6 +7,7 @@ import os
 from types import SimpleNamespace
 from pathlib import Path
 import socket
+import sys
 import time
 import urllib.error
 from zipfile import ZipFile
@@ -281,24 +282,52 @@ def test_network_failure_log_does_not_expose_exception_url(fake_http):
 
 
 def test_waiting_page_is_recognized_and_browser_failure_is_actionable(fake_http, monkeypatch):
-    # Playwright is optional; the browser fallback tests only run where it is installed.
-    playwright_api = pytest.importorskip("playwright.sync_api", reason="Playwright is optional")
-    BrowserType, Error = playwright_api.BrowserType, playwright_api.Error
     responses, _ = fake_http
     responses[URL] = (CHALLENGE, "text/html")
     assert jobinja._is_browser_challenge(CHALLENGE.decode())
     assert not jobinja._is_browser_challenge('<script src="resume.js"></script>')
     attempts = []
-    def unavailable(browser_type, **kwargs):
-        attempts.append(kwargs["channel"])
-        raise Error("SENSITIVE browser path")
-    monkeypatch.setattr(BrowserType, "launch", unavailable)
+    # A stub, never the real driver: starting Playwright's node process inside a
+    # unit test hangs on the Windows runner. The gated browser test still uses it.
+    monkeypatch.setitem(sys.modules, "playwright.sync_api", fake_playwright(attempts))
     with pytest.raises(jobinja.JobinjaError) as error:
         jobinja.fetch_resume(URL)
     assert attempts == ["chrome", "msedge"]
     assert "Chrome یا Microsoft Edge" in str(error.value)
     assert "__arcsjs" in str(error.value)
     assert "SENSITIVE" not in str(error.value)
+
+
+def fake_playwright(attempts: list[str]):
+    """Minimal playwright.sync_api stand-in whose launch always fails."""
+    import types
+
+    class Error(Exception):
+        pass
+
+    class TimeoutError(Exception):
+        pass
+
+    class Chromium:
+        def launch(self, **kwargs):
+            attempts.append(kwargs.get("channel"))
+            raise Error(f"SENSITIVE browser path for {kwargs.get('channel')}")
+
+    class Playwright:
+        chromium = Chromium()
+
+    class Session:
+        def __enter__(self):
+            return Playwright()
+
+        def __exit__(self, *exc):
+            return False
+
+    module = types.ModuleType("playwright.sync_api")
+    module.Error = Error
+    module.TimeoutError = TimeoutError
+    module.sync_playwright = lambda: Session()
+    return module
 
 
 def challenge_page(key=6, nested=True):
