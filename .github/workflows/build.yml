@@ -60,9 +60,15 @@ jobs:
       - name: Backend tests - extraction and API
         working-directory: source
         run: python -m pytest backend/tests/test_backend.py -q
-      - name: Backend tests - Jobinja import
+      - name: Backend tests - Jobinja HTTP and parsing
         working-directory: source
-        run: python -m pytest backend/tests/test_jobinja.py -q
+        run: python -m pytest backend/tests/test_jobinja.py -q -k "not gone and not unclassified and not viewer and not persian"
+      - name: Backend tests - Jobinja 403/404 reporting
+        working-directory: source
+        run: python -m pytest backend/tests/test_jobinja.py -q -k "gone or unclassified"
+      - name: Backend tests - Jobinja import pipeline
+        working-directory: source
+        run: python -m pytest backend/tests/test_jobinja.py -q -k "viewer or persian"
       - name: Backend tests - ZIP export
         working-directory: source
         run: python -m pytest backend/tests/test_zip.py -q
